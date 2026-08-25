@@ -1,0 +1,15 @@
+services:
+  hatch:
+    build:
+      context: .
+    image: hatch:local
+    container_name: hatch
+    restart: unless-stopped
+    network_mode: host
+    shm_size: "1gb"
+    environment:
+      RDP_USER: ${RDP_USER:-oauth}
+      RDP_PASSWORD: ${RDP_PASSWORD:?Set RDP_PASSWORD in .env}
+      CHROMIUM_EXTRA_FLAGS: ${CHROMIUM_EXTRA_FLAGS:-}
+    security_opt:
+      - no-new-privileges:true
