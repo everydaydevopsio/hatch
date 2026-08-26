@@ -35,25 +35,46 @@ Host networking is essential. Chromium shares the Linux host network namespace, 
 ```bash
 git clone https://github.com/everydaydevopsio/hatch.git
 cd hatch
-./scripts/install.sh
+docker build -t hatch:local .
 ```
 
-The installer checks Docker, creates `.env` when needed, generates a random RDP password when OpenSSL is available, and builds the image.
+Generate an RDP password before starting the container:
 
-Review the credentials with `cat .env`. Treat this file as a secret.
+```bash
+if command -v openssl >/dev/null 2>&1; then
+  RDP_PASSWORD="$(openssl rand -hex 24)"
+elif command -v python3 >/dev/null 2>&1; then
+  RDP_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_hex(24))')"
+else
+  echo "Install openssl or python3 to generate an RDP password." >&2
+  exit 1
+fi
+printf 'RDP user: oauth\nRDP password: %s\n' "$RDP_PASSWORD"
+```
+
+Treat the password as a secret.
 
 ## Start and stop
 
 ```bash
-./scripts/run.sh
-docker compose ps
-docker compose logs -f hatch
+docker run -d \
+  --name hatch \
+  --network host \
+  --restart unless-stopped \
+  --shm-size=1g \
+  --security-opt no-new-privileges:true \
+  -e RDP_USER=oauth \
+  -e RDP_PASSWORD="$RDP_PASSWORD" \
+  hatch:local
+docker ps --filter name=hatch
+docker logs -f hatch
 ```
 
 Stop Hatch with:
 
 ```bash
-docker compose down
+docker stop hatch
+docker rm hatch
 ```
 
 ## Secure RDP access
@@ -142,11 +163,47 @@ A protocol-specific `400` or `404` can still prove connectivity. `Connection ref
 
 ```bash
 git pull
-docker compose build --pull
-docker compose up -d
+docker build --pull -t hatch:local .
+if [ -z "${RDP_PASSWORD:-}" ]; then
+  echo "Set RDP_PASSWORD before restarting Hatch." >&2
+  exit 1
+fi
+docker stop hatch
+docker rm hatch
+docker run -d \
+  --name hatch \
+  --network host \
+  --restart unless-stopped \
+  --shm-size=1g \
+  --security-opt no-new-privileges:true \
+  -e RDP_USER=oauth \
+  -e RDP_PASSWORD="$RDP_PASSWORD" \
+  hatch:local
 ```
 
 Rebuild regularly so the image receives Chromium and Debian security updates.
+
+## Docker Compose option
+
+If you prefer Docker Compose:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and set a long random `RDP_PASSWORD`, then start Hatch:
+
+```bash
+docker compose up -d --build
+docker compose ps
+docker compose logs -f hatch
+```
+
+Stop Hatch with:
+
+```bash
+docker compose down
+```
 
 ## GitHub Container Registry
 

@@ -46,14 +46,40 @@ The MCP server or CLI runs normally on the Linux host. Only the GUI browser runs
 git clone https://github.com/everydaydevopsio/hatch.git
 cd hatch
 
-./scripts/install.sh
-./scripts/run.sh
+docker build -t hatch:local .
+
+if command -v openssl >/dev/null 2>&1; then
+  RDP_PASSWORD="$(openssl rand -hex 24)"
+elif command -v python3 >/dev/null 2>&1; then
+  RDP_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_hex(24))')"
+else
+  echo "Install openssl or python3 to generate an RDP password." >&2
+  exit 1
+fi
+printf 'RDP user: oauth\nRDP password: %s\n' "$RDP_PASSWORD"
+
+docker run -d \
+  --name hatch \
+  --network host \
+  --restart unless-stopped \
+  --shm-size=1g \
+  --security-opt no-new-privileges:true \
+  -e RDP_USER=oauth \
+  -e RDP_PASSWORD="$RDP_PASSWORD" \
+  hatch:local
 ```
 
-Get the generated password from `.env` and connect an RDP client to:
+Connect an RDP client to:
 
 ```text
 <server-private-ip>:3389
+```
+
+Use the printed username and password. Stop Hatch with:
+
+```bash
+docker stop hatch
+docker rm hatch
 ```
 
 Use a Tailscale/VPN address or an SSH tunnel. **Do not expose TCP/3389 directly to the public Internet.**
@@ -79,23 +105,24 @@ Connect to Hatch over RDP, open Chromium, paste the authorization URL, and sign 
 
 The provider redirects Chromium to `127.0.0.1:8765`. Because the container uses host networking, that request reaches the callback listener running on the Linux host.
 
-## Build manually
+## Docker Compose option
 
 ```bash
-docker build -t hatch:local .
+cp .env.example .env
 ```
 
-Run:
+Edit `.env` and set a long random `RDP_PASSWORD`, then start Hatch:
 
 ```bash
-docker run -d \
-  --name hatch \
-  --network host \
-  --shm-size=1g \
-  --security-opt no-new-privileges:true \
-  -e RDP_USER=oauth \
-  -e RDP_PASSWORD='use-a-long-random-password' \
-  hatch:local
+docker compose up -d --build
+docker compose ps
+docker compose logs -f hatch
+```
+
+Stop Hatch with:
+
+```bash
+docker compose down
 ```
 
 ## Project layout
@@ -111,9 +138,7 @@ docker run -d \
 │   └── supervisord.conf
 ├── scripts/
 │   ├── entrypoint.sh
-│   ├── healthcheck.sh
-│   ├── install.sh
-│   └── run.sh
+│   └── healthcheck.sh
 └── .github/workflows/docker.yml
 ```
 
@@ -129,7 +154,7 @@ This keeps the browser utility generic. Any host process can use it, regardless 
 
 ### Browser persistence is off by default
 
-The default Compose file does not persist Chromium's profile. This reduces the amount of session/cookie material left behind. A commented volume is included if persistent browser sessions are required.
+The default container does not persist Chromium's profile. This reduces the amount of session/cookie material left behind. If persistent browser sessions are required, mount `/home/oauth/.config/chromium` as a Docker volume and protect it as sensitive authentication material.
 
 ## Supported host
 
