@@ -10,6 +10,7 @@ services:
     environment:
       RDP_USER: ${RDP_USER:-oauth}
       RDP_PASSWORD: ${RDP_PASSWORD:-}
+      HATCH_START_URL: ${HATCH_START_URL:-about:blank}
       CHROMIUM_EXTRA_FLAGS: ${CHROMIUM_EXTRA_FLAGS:-}
     security_opt:
       - no-new-privileges:true

@@ -78,6 +78,8 @@ ssh -L 13389:127.0.0.1:3389 user@server
 
 Then point your RDP client at `127.0.0.1:13389`.
 
+Use an RDP client, not a web browser. `http://<server-private-ip>:3389/` will not work because TCP/3389 speaks the RDP protocol, not HTTP.
+
 ## Complete an OAuth login
 
 Start the OAuth flow in your normal SSH shell:
@@ -193,6 +195,29 @@ Stop Hatch with:
 ```bash
 docker compose down
 ```
+
+## Browser access with Guacamole
+
+RDP does not run directly over HTTPS. To use Hatch from a browser, run Apache Guacamole in front of the Hatch RDP service and expose Guacamole through HTTPS with your normal reverse proxy or load balancer.
+
+Use the Guacamole E2E test below as the reference wiring: Hatch, `guacd`, Guacamole, and Postgres run on the same Docker network, and Guacamole connects to Hatch on TCP/3389 with the generated RDP password from the Hatch logs.
+
+## E2E Guacamole test
+
+Run the smoke test from the repository root:
+
+```bash
+scripts/e2e-guacamole.sh
+```
+
+It builds Hatch, starts temporary Hatch/Postgres/guacd/Guacamole containers, extracts the generated RDP password from Hatch logs, seeds Guacamole with a Hatch RDP connection, logs into the Guacamole web UI with Playwright, opens the RDP session, and verifies Chromium opens `https://www.google.com`.
+
+Required host tools:
+
+- Docker
+- `nc`
+- Node.js
+- npm
 
 ## GitHub Container Registry
 

@@ -4,6 +4,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
     RDP_USER=oauth \
+    HATCH_START_URL=about:blank \
     CHROMIUM_EXTRA_FLAGS=""
 
 RUN apt-get update && apt-get install -y --no-install-recommends \

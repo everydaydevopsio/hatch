@@ -11,6 +11,9 @@ if ! id "$RDP_USER" >/dev/null 2>&1; then useradd --create-home --shell /bin/bas
 printf '%s:%s\n' "$RDP_USER" "$RDP_PASSWORD" | chpasswd
 install -d -o "$RDP_USER" -g "$RDP_USER" -m 0700 "/home/$RDP_USER/.config"
 install -d -o "$RDP_USER" -g "$RDP_USER" -m 0700 "/home/$RDP_USER/.cache"
+install -d -m 0755 /etc/hatch
+printf '%s\n' "${HATCH_START_URL:-about:blank}" > /etc/hatch/start-url
+chmod 0644 /etc/hatch/start-url
 install -d -m 0700 /var/log/hatch
 {
   echo "Hatch RDP credentials"
