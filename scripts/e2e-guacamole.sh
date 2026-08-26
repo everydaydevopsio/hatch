@@ -73,6 +73,14 @@ if ! curl -kfsS "https://127.0.0.1:${HTTPS_PORT}/guacamole/" >/dev/null; then
   exit 1
 fi
 
+HTTP_REDIRECT_LOCATION="$(curl -sSI "http://127.0.0.1:${HTTPS_PORT}/" 2>/dev/null | sed -n 's/^[Ll]ocation: //p' | tr -d '\r' | tail -n 1 || true)"
+if [ "$HTTP_REDIRECT_LOCATION" != "https://127.0.0.1:${HTTPS_PORT}/" ]; then
+  docker logs "${PREFIX}-hatch" >&2 || true
+  echo "ERROR: HTTP on the HTTPS port did not redirect to https://127.0.0.1:${HTTPS_PORT}/." >&2
+  echo "Observed Location: ${HTTP_REDIRECT_LOCATION:-<none>}" >&2
+  exit 1
+fi
+
 GUAC_USER="$(docker logs "${PREFIX}-hatch" 2>&1 | sed -n 's/^Guacamole user: //p' | tail -n 1)"
 GUAC_PASSWORD="$(docker logs "${PREFIX}-hatch" 2>&1 | sed -n 's/^Guacamole password: //p' | tail -n 1)"
 if [ -z "$GUAC_USER" ] || [ -z "$GUAC_PASSWORD" ]; then
@@ -121,7 +129,12 @@ GUAC_PASSWORD="$GUAC_PASSWORD" \
   }
 
 for _ in $(seq 1 45); do
-  if docker exec "${PREFIX}-hatch" sh -lc "pgrep -af 'chromium.*${URL}' >/dev/null"; then
+  if docker exec -e EXPECTED_URL="$URL" "${PREFIX}-hatch" sh -lc "pgrep -af '[c]hromium' | grep -F -- \"\$EXPECTED_URL\" >/dev/null"; then
+    if ! docker exec -e EXPECTED_URL="$URL" "${PREFIX}-hatch" sh -lc "pgrep -af '[c]hromium' | grep -F -- \"\$EXPECTED_URL\" | grep -F -- '--test-type' >/dev/null"; then
+      echo "ERROR: Chromium did not start with --test-type to suppress unsupported flag warnings." >&2
+      docker exec -e EXPECTED_URL="$URL" "${PREFIX}-hatch" sh -lc "pgrep -af '[c]hromium' | grep -F -- \"\$EXPECTED_URL\" || true" >&2 || true
+      exit 1
+    fi
     echo "Guacamole E2E succeeded: HTTPS login reached Hatch RDP and Chromium opened $URL"
     exit 0
   fi

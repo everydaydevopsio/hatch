@@ -208,7 +208,7 @@ A protocol-specific `400` or `404` can still prove connectivity. `Connection ref
 
 ## Chromium Sandbox
 
-Hatch keeps Chromium's sandbox enabled when the container runtime allows it. If the container is started with `--security-opt no-new-privileges:true`, Chromium cannot use its setuid sandbox, so Hatch automatically adds `--no-sandbox` for that session.
+If the container is started with `--security-opt no-new-privileges:true`, Chromium cannot use its setuid sandbox, so Hatch automatically adds `--no-sandbox` for that session. Hatch also adds Chromium's `--test-type` flag in that mode to suppress Chromium's unsupported command-line flag warning.
 
 If an unusually restrictive host still prevents Chromium from starting, diagnose the host first. As a last resort, set:
 

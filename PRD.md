@@ -9,6 +9,7 @@ Hatch must provide browser-based desktop access through HTTPS from the container
 ### Acceptance Criteria
 
 - The default container listens on HTTPS port `443`.
+- Plain HTTP requests sent to the published HTTPS port redirect to the equivalent `https://` URL.
 - The HTTPS server proxies `/guacamole/` to Guacamole on `127.0.0.1:8080`.
 - Guacamole connects through `guacd` on `127.0.0.1:4822`.
 - `guacd` connects to xrdp on `127.0.0.1:3389`.
@@ -17,5 +18,6 @@ Hatch must provide browser-based desktop access through HTTPS from the container
 - The generated Guacamole credentials are printed to container logs and usable when the container is started detached.
 - Docker users can map any host port to container port `443`, for example `-p 8443:443`.
 - Host-network OAuth callback mode remains documented for cases where Chromium must reach a callback listener on host loopback.
+- Default Docker and Docker Compose starts do not show Chromium's unsupported `--no-sandbox` warning.
 - The README presents the HTTPS Guacamole flow as the primary quickstart and keeps Docker Compose as a lower-priority option.
 - An E2E smoke test validates the HTTPS Guacamole login path and confirms the browser desktop starts.
