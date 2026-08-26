@@ -7,6 +7,10 @@ if [ -z "${RDP_PASSWORD:-}" ]; then
   RDP_PASSWORD="$(openssl rand -hex 24)"
   GENERATED_PASSWORD=1
 fi
+case "$RDP_PASSWORD" in
+  *:*|*'
+'*) echo >&2 "ERROR: RDP_PASSWORD must not contain ':' or newlines."; exit 64;;
+esac
 if ! id "$RDP_USER" >/dev/null 2>&1; then useradd --create-home --shell /bin/bash "$RDP_USER"; fi
 printf '%s:%s\n' "$RDP_USER" "$RDP_PASSWORD" | chpasswd
 install -d -o "$RDP_USER" -g "$RDP_USER" -m 0700 "/home/$RDP_USER/.config"
@@ -17,7 +21,7 @@ chmod 0644 /etc/hatch/start-url
 install -d -m 0700 /var/log/hatch
 {
   echo "Hatch RDP credentials"
-  echo "Generated: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  echo "Written: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
   echo "RDP user: $RDP_USER"
   echo "RDP password: $RDP_PASSWORD"
 } > /var/log/hatch/rdp-credentials.log
