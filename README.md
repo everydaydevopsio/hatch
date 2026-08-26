@@ -48,16 +48,6 @@ cd hatch
 
 docker build -t hatch:local .
 
-if command -v openssl >/dev/null 2>&1; then
-  RDP_PASSWORD="$(openssl rand -hex 24)"
-elif command -v python3 >/dev/null 2>&1; then
-  RDP_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_hex(24))')"
-else
-  echo "Install openssl or python3 to generate an RDP password." >&2
-  exit 1
-fi
-printf 'RDP user: oauth\nRDP password: %s\n' "$RDP_PASSWORD"
-
 docker run -d \
   --name hatch \
   --network host \
@@ -65,8 +55,9 @@ docker run -d \
   --shm-size=1g \
   --security-opt no-new-privileges:true \
   -e RDP_USER=oauth \
-  -e RDP_PASSWORD="$RDP_PASSWORD" \
   hatch:local
+
+docker logs hatch
 ```
 
 Connect an RDP client to:
@@ -75,7 +66,9 @@ Connect an RDP client to:
 <server-private-ip>:3389
 ```
 
-Use the printed username and password. Stop Hatch with:
+Use the username and generated password printed by `docker logs hatch`. The credentials are also written inside the container at `/var/log/hatch/rdp-credentials.log`.
+
+Stop Hatch with:
 
 ```bash
 docker stop hatch
@@ -111,12 +104,12 @@ The provider redirects Chromium to `127.0.0.1:8765`. Because the container uses 
 cp .env.example .env
 ```
 
-Edit `.env` and set a long random `RDP_PASSWORD`, then start Hatch:
+Edit `.env` only if you want to override defaults, then start Hatch:
 
 ```bash
 docker compose up -d --build
 docker compose ps
-docker compose logs -f hatch
+docker compose logs hatch
 ```
 
 Stop Hatch with:
@@ -134,6 +127,7 @@ docker compose down
 ├── .env.example
 ├── config/
 │   ├── chromium-launch.sh
+│   ├── login-shell.sh
 │   ├── startwm.sh
 │   └── supervisord.conf
 ├── scripts/

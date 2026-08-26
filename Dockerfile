@@ -30,10 +30,11 @@ RUN adduser xrdp ssl-cert || true
 COPY config/supervisord.conf /etc/supervisor/conf.d/hatch.conf
 COPY config/startwm.sh /usr/local/bin/hatch-startwm
 COPY config/chromium-launch.sh /usr/local/bin/hatch-chromium
+COPY config/login-shell.sh /usr/local/bin/hatch-login-shell
 COPY scripts/entrypoint.sh /usr/local/bin/hatch-entrypoint
 COPY scripts/healthcheck.sh /usr/local/bin/hatch-healthcheck
 
-RUN chmod +x /usr/local/bin/hatch-entrypoint /usr/local/bin/hatch-startwm /usr/local/bin/hatch-chromium /usr/local/bin/hatch-healthcheck \
+RUN chmod +x /usr/local/bin/hatch-entrypoint /usr/local/bin/hatch-startwm /usr/local/bin/hatch-chromium /usr/local/bin/hatch-login-shell /usr/local/bin/hatch-healthcheck \
     && cp /etc/xrdp/startwm.sh /etc/xrdp/startwm.sh.dist \
     && printf '#!/bin/sh\nexec /usr/local/bin/hatch-startwm\n' > /etc/xrdp/startwm.sh \
     && chmod +x /etc/xrdp/startwm.sh

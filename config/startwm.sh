@@ -12,5 +12,5 @@ openbox-session &
 OPENBOX_PID=$!
 sleep 1
 /usr/local/bin/hatch-chromium &
-xterm -geometry 100x28+20+20 -title "Hatch" &
+xterm -geometry 100x28+20+20 -title "Hatch" -e /usr/local/bin/hatch-login-shell &
 wait "$OPENBOX_PID"

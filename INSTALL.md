@@ -38,21 +38,7 @@ cd hatch
 docker build -t hatch:local .
 ```
 
-Generate an RDP password before starting the container:
-
-```bash
-if command -v openssl >/dev/null 2>&1; then
-  RDP_PASSWORD="$(openssl rand -hex 24)"
-elif command -v python3 >/dev/null 2>&1; then
-  RDP_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_hex(24))')"
-else
-  echo "Install openssl or python3 to generate an RDP password." >&2
-  exit 1
-fi
-printf 'RDP user: oauth\nRDP password: %s\n' "$RDP_PASSWORD"
-```
-
-Treat the password as a secret.
+Hatch generates an RDP password at container startup when `RDP_PASSWORD` is not set. Treat the generated password as a secret.
 
 ## Start and stop
 
@@ -64,11 +50,12 @@ docker run -d \
   --shm-size=1g \
   --security-opt no-new-privileges:true \
   -e RDP_USER=oauth \
-  -e RDP_PASSWORD="$RDP_PASSWORD" \
   hatch:local
 docker ps --filter name=hatch
-docker logs -f hatch
+docker logs hatch
 ```
+
+Use the username and generated password printed by `docker logs hatch`. The credentials are also written inside the container at `/var/log/hatch/rdp-credentials.log`.
 
 Stop Hatch with:
 
@@ -132,9 +119,15 @@ Hatch is disposable by default. Browser cookies and sessions disappear when the 
 Check Hatch:
 
 ```bash
-docker compose ps
-docker compose logs hatch
+docker ps --filter name=hatch
+docker logs hatch
 docker exec hatch ps aux
+```
+
+Show the generated credentials again:
+
+```bash
+docker exec hatch cat /var/log/hatch/rdp-credentials.log
 ```
 
 Verify host networking:
@@ -164,10 +157,6 @@ A protocol-specific `400` or `404` can still prove connectivity. `Connection ref
 ```bash
 git pull
 docker build --pull -t hatch:local .
-if [ -z "${RDP_PASSWORD:-}" ]; then
-  echo "Set RDP_PASSWORD before restarting Hatch." >&2
-  exit 1
-fi
 docker stop hatch
 docker rm hatch
 docker run -d \
@@ -177,8 +166,8 @@ docker run -d \
   --shm-size=1g \
   --security-opt no-new-privileges:true \
   -e RDP_USER=oauth \
-  -e RDP_PASSWORD="$RDP_PASSWORD" \
   hatch:local
+docker logs hatch
 ```
 
 Rebuild regularly so the image receives Chromium and Debian security updates.
@@ -191,12 +180,12 @@ If you prefer Docker Compose:
 cp .env.example .env
 ```
 
-Edit `.env` and set a long random `RDP_PASSWORD`, then start Hatch:
+Edit `.env` only if you want to override defaults, then start Hatch:
 
 ```bash
 docker compose up -d --build
 docker compose ps
-docker compose logs -f hatch
+docker compose logs hatch
 ```
 
 Stop Hatch with:
