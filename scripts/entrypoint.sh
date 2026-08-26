@@ -30,6 +30,8 @@ if [ ! -s /etc/xrdp/key.pem ] || [ ! -s /etc/xrdp/cert.pem ]; then xrdp-keygen x
 mkdir -p /run/xrdp
 chmod 0755 /run/xrdp
 rm -f /run/xrdp/xrdp.pid /run/xrdp/xrdp-sesman.pid
+export RDP_USER RDP_PASSWORD HATCH_HTTPS_PORT HATCH_START_URL CHROMIUM_EXTRA_FLAGS GUACAMOLE_HOME GUACD_HOSTNAME GUACD_PORT WEBAPP_CONTEXT
+/usr/local/bin/hatch-guacamole-config
 echo "Hatch starting"
 echo "RDP user: $RDP_USER"
 if [ "$GENERATED_PASSWORD" -eq 1 ]; then
@@ -39,5 +41,6 @@ else
   echo "Using RDP password from RDP_PASSWORD"
   echo "RDP credentials were also written to /var/log/hatch/rdp-credentials.log"
 fi
-echo "Network requirement: Docker host networking for localhost OAuth callbacks"
+echo "HTTPS access: publish container port ${HATCH_HTTPS_PORT:-443}, for example -p 8443:${HATCH_HTTPS_PORT:-443}"
+echo "OAuth callback note: use Docker host networking only when Chromium must reach services on host loopback"
 exec "$@"
