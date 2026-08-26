@@ -40,7 +40,7 @@ if [ ! -s /etc/xrdp/key.pem ] || [ ! -s /etc/xrdp/cert.pem ]; then xrdp-keygen x
 mkdir -p /run/xrdp
 chmod 0755 /run/xrdp
 rm -f /run/xrdp/xrdp.pid /run/xrdp/xrdp-sesman.pid
-export RDP_USER RDP_PASSWORD HATCH_HTTPS_PORT HATCH_START_URL CHROMIUM_EXTRA_FLAGS GUACAMOLE_HOME GUACD_HOSTNAME GUACD_PORT WEBAPP_CONTEXT
+export RDP_USER RDP_PASSWORD HATCH_HTTPS_PORT HATCH_START_URL HATCH_MAC_SHORTCUTS CHROMIUM_EXTRA_FLAGS GUACAMOLE_HOME GUACD_HOSTNAME GUACD_PORT WEBAPP_CONTEXT
 /usr/local/bin/hatch-guacamole-config
 echo "Hatch starting"
 echo "RDP user: $RDP_USER"

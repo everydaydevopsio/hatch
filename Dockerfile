@@ -42,6 +42,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     RDP_USER=oauth \
     HATCH_HTTPS_PORT=443 \
     HATCH_START_URL=about:blank \
+    HATCH_MAC_SHORTCUTS=1 \
     CHROMIUM_EXTRA_FLAGS="" \
     CATALINA_HOME=/usr/local/tomcat \
     GUACAMOLE_HOME=/etc/guacamole \
@@ -78,6 +79,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       openssl \
       procps \
       supervisor \
+      xbindkeys \
+      xdotool \
       x11-xserver-utils \
       xorg \
       xorgxrdp \
