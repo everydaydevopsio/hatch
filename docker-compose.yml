@@ -5,11 +5,20 @@ services:
     image: hatch:local
     container_name: hatch
     restart: unless-stopped
-    network_mode: host
+    ports:
+      - "${HATCH_HTTPS_HOST_PORT:-8443}:${HATCH_HTTPS_PORT:-443}"
     shm_size: "1gb"
     environment:
       RDP_USER: ${RDP_USER:-oauth}
-      RDP_PASSWORD: ${RDP_PASSWORD:?Set RDP_PASSWORD in .env}
+      RDP_PASSWORD: ${RDP_PASSWORD:-}
+      GUAC_USER: ${GUAC_USER:-}
+      GUAC_PASSWORD: ${GUAC_PASSWORD:-}
+      HATCH_HTTPS_PORT: ${HATCH_HTTPS_PORT:-443}
+      HATCH_START_URL: ${HATCH_START_URL:-about:blank}
       CHROMIUM_EXTRA_FLAGS: ${CHROMIUM_EXTRA_FLAGS:-}
+      HATCH_TLS_CERT: ${HATCH_TLS_CERT:-/etc/hatch/tls/hatch.crt}
+      HATCH_TLS_KEY: ${HATCH_TLS_KEY:-/etc/hatch/tls/hatch.key}
+      HATCH_TLS_CN: ${HATCH_TLS_CN:-hatch.local}
+      HATCH_TLS_DAYS: ${HATCH_TLS_DAYS:-365}
     security_opt:
       - no-new-privileges:true

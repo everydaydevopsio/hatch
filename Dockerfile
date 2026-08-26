@@ -1,19 +1,81 @@
-FROM debian:13-slim
+FROM debian:12-slim AS guacd-builder
+
+ARG GUACAMOLE_VERSION=1.6.0
+ARG GUACAMOLE_SERVER_SHA256=8bc45675da96d7b6f39728160181e3d4ff3c08f460f6d26de5805b642bf13f2b
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential \
+      ca-certificates \
+      freerdp2-dev \
+      libcairo2-dev \
+      libjpeg62-turbo-dev \
+      libossp-uuid-dev \
+      libpango1.0-dev \
+      libpng-dev \
+      libssh2-1-dev \
+      libssl-dev \
+      libswscale-dev \
+      libtelnet-dev \
+      libtool-bin \
+      libvncserver-dev \
+      libwebsockets-dev \
+      uuid-dev \
+      wget \
+    && wget -O /tmp/guacamole-server.tar.gz "https://archive.apache.org/dist/guacamole/${GUACAMOLE_VERSION}/source/guacamole-server-${GUACAMOLE_VERSION}.tar.gz" \
+    && echo "${GUACAMOLE_SERVER_SHA256}  /tmp/guacamole-server.tar.gz" | sha256sum -c - \
+    && mkdir -p /tmp/guacamole-server \
+    && tar -xzf /tmp/guacamole-server.tar.gz -C /tmp/guacamole-server --strip-components=1 \
+    && cd /tmp/guacamole-server \
+    && CFLAGS="-Wno-error=deprecated-declarations" ./configure --prefix=/usr/local \
+    && make -j"$(nproc)" \
+    && make install DESTDIR=/opt/guacd-root
+
+FROM guacamole/guacamole:1.6.0 AS guacamole-web
+
+FROM debian:12-slim
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
     RDP_USER=oauth \
-    CHROMIUM_EXTRA_FLAGS=""
+    HATCH_HTTPS_PORT=443 \
+    HATCH_START_URL=about:blank \
+    CHROMIUM_EXTRA_FLAGS="" \
+    CATALINA_HOME=/usr/local/tomcat \
+    GUACAMOLE_HOME=/etc/guacamole \
+    GUACD_HOSTNAME=127.0.0.1 \
+    GUACD_PORT=4822 \
+    WEBAPP_CONTEXT=guacamole \
+    PATH=/usr/local/tomcat/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    LD_LIBRARY_PATH=/usr/local/lib
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
       chromium \
       chromium-sandbox \
       dbus-x11 \
+      default-jre-headless \
       fonts-liberation \
+      libcairo2 \
+      libfreerdp-client2-2 \
+      libfreerdp2-2 \
+      libjpeg62-turbo \
+      libossp-uuid16 \
+      libpango-1.0-0 \
+      libpangocairo-1.0-0 \
+      libpng16-16 \
+      libssh2-1 \
+      libswscale6 \
+      libtelnet2 \
+      libvncclient1 \
+      libwebsockets17 \
+      libwinpr2-2 \
       locales \
+      nginx-light \
       openbox \
+      openssl \
       procps \
       supervisor \
       x11-xserver-utils \
@@ -22,23 +84,33 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       xrdp \
       xterm \
     && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /run/xrdp /run/dbus /var/log/supervisor \
+    && mkdir -p /run/xrdp /var/log/supervisor /etc/guacamole /etc/hatch/tls \
     && chmod 0755 /run/xrdp
 
 RUN adduser xrdp ssl-cert || true
 
+COPY --from=guacamole-web /opt/guacamole /opt/guacamole
+COPY --from=guacamole-web /usr/local/tomcat /usr/local/tomcat
+COPY --from=guacd-builder /opt/guacd-root/usr/local /usr/local
+COPY --from=guacd-builder /opt/guacd-root/usr/lib/x86_64-linux-gnu/freerdp2 /usr/lib/x86_64-linux-gnu/freerdp2
+
 COPY config/supervisord.conf /etc/supervisor/conf.d/hatch.conf
 COPY config/startwm.sh /usr/local/bin/hatch-startwm
 COPY config/chromium-launch.sh /usr/local/bin/hatch-chromium
+COPY config/login-shell.sh /usr/local/bin/hatch-login-shell
+COPY scripts/guacamole-config.sh /usr/local/bin/hatch-guacamole-config
 COPY scripts/entrypoint.sh /usr/local/bin/hatch-entrypoint
 COPY scripts/healthcheck.sh /usr/local/bin/hatch-healthcheck
 
-RUN chmod +x /usr/local/bin/hatch-entrypoint /usr/local/bin/hatch-startwm /usr/local/bin/hatch-chromium /usr/local/bin/hatch-healthcheck \
+RUN ldconfig \
+    && rm -f /etc/nginx/sites-enabled/default /etc/nginx/conf.d/default.conf \
+    && chmod +x /usr/local/bin/hatch-entrypoint /usr/local/bin/hatch-startwm /usr/local/bin/hatch-chromium /usr/local/bin/hatch-login-shell /usr/local/bin/hatch-guacamole-config /usr/local/bin/hatch-healthcheck \
     && cp /etc/xrdp/startwm.sh /etc/xrdp/startwm.sh.dist \
     && printf '#!/bin/sh\nexec /usr/local/bin/hatch-startwm\n' > /etc/xrdp/startwm.sh \
-    && chmod +x /etc/xrdp/startwm.sh
+    && chmod +x /etc/xrdp/startwm.sh \
+    && sed -i 's/^port=3389$/port=tcp:\/\/127.0.0.1:3389/' /etc/xrdp/xrdp.ini
 
-EXPOSE 3389
+EXPOSE 443
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD ["/usr/local/bin/hatch-healthcheck"]
 

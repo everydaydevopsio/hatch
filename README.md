@@ -1,46 +1,22 @@
 # Hatch
 
-A small Dockerized RDP desktop for completing interactive OAuth flows on a headless Linux server.
+A small Dockerized browser desktop for completing interactive OAuth flows on a headless Linux server.
 
-It runs:
-
-- Chromium
-- Openbox
-- xrdp + xorgxrdp
-- a minimal X11 environment
-
-The container is intentionally run with **Docker host networking**. That makes Chromium's `127.0.0.1` the Linux host's loopback interface, which is the important part for CLI and MCP OAuth flows that start a callback listener such as:
+Hatch runs Chromium behind Apache Guacamole and serves the desktop over HTTPS from the container. The internal path is:
 
 ```text
-http://127.0.0.1:8765/oauth/callback
+Browser
+  -> HTTPS on container port 443
+  -> nginx
+  -> Guacamole on 127.0.0.1:8080
+  -> guacd on 127.0.0.1:4822
+  -> xrdp on 127.0.0.1:3389
+  -> Openbox + Chromium
 ```
 
-## How it works
+The container generates a self-signed HTTPS certificate and a random desktop password at startup unless you provide your own values.
 
-```text
-Mac / iPad / workstation
-        |
-        | RDP over Tailscale, VPN, or SSH
-        v
-+-----------------------------------------+
-| Headless Linux server                   |
-|                                         |
-|  +-----------------------------------+  |
-|  | Docker: hatch                     |  |
-|  | xrdp -> Openbox -> Chromium       |  |
-|  +----------------+------------------+  |
-|                   | host networking     |
-|                   v                     |
-|             127.0.0.1                   |
-|                   |                     |
-|                   v                     |
-|        MCP/CLI OAuth callback           |
-+-----------------------------------------+
-```
-
-The MCP server or CLI runs normally on the Linux host. Only the GUI browser runs in Docker.
-
-## Quick start
+## Quick Start
 
 ```bash
 git clone https://github.com/everydaydevopsio/hatch.git
@@ -48,16 +24,44 @@ cd hatch
 
 docker build -t hatch:local .
 
-if command -v openssl >/dev/null 2>&1; then
-  RDP_PASSWORD="$(openssl rand -hex 24)"
-elif command -v python3 >/dev/null 2>&1; then
-  RDP_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_hex(24))')"
-else
-  echo "Install openssl or python3 to generate an RDP password." >&2
-  exit 1
-fi
-printf 'RDP user: oauth\nRDP password: %s\n' "$RDP_PASSWORD"
+docker run -d \
+  --name hatch \
+  -p 8443:443 \
+  --restart unless-stopped \
+  --shm-size=1g \
+  --security-opt no-new-privileges:true \
+  -e RDP_USER=oauth \
+  hatch:local
 
+docker logs hatch
+```
+
+Open:
+
+```text
+https://<server>:8443/guacamole/
+```
+
+Accept the self-signed certificate warning, then sign in with the `Guacamole user` and `Guacamole password` printed by `docker logs hatch`. The generated RDP credentials are also written inside the container at `/var/log/hatch/rdp-credentials.log`.
+
+Stop Hatch with:
+
+```bash
+docker stop hatch
+docker rm hatch
+```
+
+## OAuth Callback Mode
+
+Some OAuth tools start a local callback listener such as:
+
+```text
+http://127.0.0.1:8765/oauth/callback
+```
+
+If Chromium inside Hatch must reach a listener running on the Docker host at `127.0.0.1`, run Hatch with Docker host networking. With host networking, Docker ignores `-p`, so choose the HTTPS listener port inside the container:
+
+```bash
 docker run -d \
   --name hatch \
   --network host \
@@ -65,67 +69,74 @@ docker run -d \
   --shm-size=1g \
   --security-opt no-new-privileges:true \
   -e RDP_USER=oauth \
-  -e RDP_PASSWORD="$RDP_PASSWORD" \
+  -e HATCH_HTTPS_PORT=8443 \
   hatch:local
 ```
 
-Connect an RDP client to:
+Open:
 
 ```text
-<server-private-ip>:3389
+https://<server>:8443/guacamole/
 ```
 
-Use the printed username and password. Stop Hatch with:
+The RDP service is bound to loopback inside the container. Use the HTTPS Guacamole endpoint instead of connecting an RDP client directly.
 
-```bash
-docker stop hatch
-docker rm hatch
-```
+## Configuration
 
-Use a Tailscale/VPN address or an SSH tunnel. **Do not expose TCP/3389 directly to the public Internet.**
-
-See [INSTALL.md](INSTALL.md) for the full installation, security, OAuth workflow, troubleshooting, and production recommendations.
-
-## Typical OAuth flow
-
-SSH to the server and start the application that needs authorization:
-
-```bash
-ssh dev-server
-my-mcp-server login
-```
-
-It may print an authorization URL and then wait on a callback:
+Common environment variables:
 
 ```text
-Waiting for OAuth callback at http://127.0.0.1:8765/callback
+RDP_USER=oauth
+RDP_PASSWORD=
+GUAC_USER=
+GUAC_PASSWORD=
+HATCH_HTTPS_PORT=443
+HATCH_START_URL=about:blank
+CHROMIUM_EXTRA_FLAGS=
+HATCH_TLS_CERT=/etc/hatch/tls/hatch.crt
+HATCH_TLS_KEY=/etc/hatch/tls/hatch.key
+HATCH_TLS_CN=hatch.local
+HATCH_TLS_DAYS=365
 ```
 
-Connect to Hatch over RDP, open Chromium, paste the authorization URL, and sign in.
+Leave `RDP_PASSWORD` blank to generate a random password. Leave `GUAC_USER` and `GUAC_PASSWORD` blank to reuse the RDP credentials for the Guacamole login.
 
-The provider redirects Chromium to `127.0.0.1:8765`. Because the container uses host networking, that request reaches the callback listener running on the Linux host.
+To use your own certificate, mount the certificate and key into the container and set `HATCH_TLS_CERT` and `HATCH_TLS_KEY`.
 
-## Docker Compose option
+## Docker Compose Option
 
 ```bash
 cp .env.example .env
-```
-
-Edit `.env` and set a long random `RDP_PASSWORD`, then start Hatch:
-
-```bash
 docker compose up -d --build
-docker compose ps
-docker compose logs -f hatch
+docker compose logs hatch
 ```
 
-Stop Hatch with:
+The compose file maps host port `${HATCH_HTTPS_HOST_PORT:-8443}` to container port `${HATCH_HTTPS_PORT:-443}`. Stop it with:
 
 ```bash
 docker compose down
 ```
 
-## Project layout
+For host-network OAuth callback mode, prefer the `docker run --network host` command above because compose port mappings are not used with host networking.
+
+## E2E Guacamole Test
+
+Run the smoke test from the repository root:
+
+```bash
+scripts/e2e-guacamole.sh
+```
+
+The test builds Hatch, starts one temporary container, waits for HTTPS health, logs into Guacamole with Playwright, opens the Hatch connection, and verifies Chromium starts at `https://www.google.com`.
+
+Required host tools:
+
+- Docker
+- `nc`
+- Node.js
+- npm
+
+## Project Layout
 
 ```text
 .
@@ -134,32 +145,29 @@ docker compose down
 ├── .env.example
 ├── config/
 │   ├── chromium-launch.sh
+│   ├── login-shell.sh
 │   ├── startwm.sh
 │   └── supervisord.conf
 ├── scripts/
+│   ├── e2e-guacamole.sh
 │   ├── entrypoint.sh
+│   ├── guacamole-config.sh
 │   └── healthcheck.sh
 └── .github/workflows/docker.yml
 ```
 
-## Design constraints
+## Supported Host
 
-### Host networking is deliberate
+This project targets Linux hosts running Docker Engine. Docker Desktop behaves differently because host networking is virtualized and is not the intended deployment environment for OAuth callback mode.
 
-Do not replace `network_mode: host` with `ports: - 3389:3389` if the OAuth callback uses loopback addresses. Under bridge networking, Chromium's `127.0.0.1` belongs to the container and no longer points at the MCP service on the host.
+## Security Notes
 
-### The MCP server stays outside this image
+Do not publish direct RDP access. Hatch exposes HTTPS for browser access, and xrdp listens on `127.0.0.1:3389` inside the container.
 
-This keeps the browser utility generic. Any host process can use it, regardless of whether the OAuth client is an MCP server, Codex tool, CLI, Python process, Node application, or another agent.
+The default certificate is self-signed. Use a reverse proxy, load balancer, or mounted certificate files if you need a publicly trusted certificate. Certbot HTTP-01 validation requires public port 80, while DNS-01 can issue certificates without opening port 80.
 
-### Browser persistence is off by default
+When the container is started with `--security-opt no-new-privileges:true`, Hatch automatically adds Chromium's `--no-sandbox` flag because the setuid sandbox cannot run under that kernel setting.
 
-The default container does not persist Chromium's profile. This reduces the amount of session/cookie material left behind. If persistent browser sessions are required, mount `/home/oauth/.config/chromium` as a Docker volume and protect it as sensitive authentication material.
+Browser persistence is off by default. If persistent browser sessions are required, mount `/home/oauth/.config/chromium` as a Docker volume and protect it as sensitive authentication material.
 
-## Supported host
-
-This project targets Linux hosts running Docker Engine. Docker Desktop behaves differently because host networking is virtualized and is not the intended deployment environment for this solution.
-
-## Base image
-
-The image currently uses Debian 13 and Debian packages for Chromium, xrdp, xorgxrdp, Openbox, and Xorg.
+See [INSTALL.md](INSTALL.md) for operational details and troubleshooting.

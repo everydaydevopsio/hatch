@@ -11,6 +11,7 @@ chmod 700 "$XDG_RUNTIME_DIR"
 openbox-session &
 OPENBOX_PID=$!
 sleep 1
-/usr/local/bin/hatch-chromium &
-xterm -geometry 100x28+20+20 -title "Hatch" &
+START_URL="$(cat /etc/hatch/start-url 2>/dev/null || printf '%s\n' about:blank)"
+/usr/local/bin/hatch-chromium "$START_URL" &
+xterm -geometry 100x28+20+20 -title "Hatch" -e /usr/local/bin/hatch-login-shell &
 wait "$OPENBOX_PID"

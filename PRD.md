@@ -1,0 +1,21 @@
+# PRD
+
+## Integrated HTTPS Guacamole Access
+
+### Requirement
+
+Hatch must provide browser-based desktop access through HTTPS from the container without requiring users to connect an RDP client directly.
+
+### Acceptance Criteria
+
+- The default container listens on HTTPS port `443`.
+- The HTTPS server proxies `/guacamole/` to Guacamole on `127.0.0.1:8080`.
+- Guacamole connects through `guacd` on `127.0.0.1:4822`.
+- `guacd` connects to xrdp on `127.0.0.1:3389`.
+- xrdp is not published as a direct external service by the default image.
+- A self-signed TLS certificate is generated automatically when no certificate is mounted.
+- The generated Guacamole credentials are printed to container logs and usable when the container is started detached.
+- Docker users can map any host port to container port `443`, for example `-p 8443:443`.
+- Host-network OAuth callback mode remains documented for cases where Chromium must reach a callback listener on host loopback.
+- The README presents the HTTPS Guacamole flow as the primary quickstart and keeps Docker Compose as a lower-priority option.
+- An E2E smoke test validates the HTTPS Guacamole login path and confirms the browser desktop starts.

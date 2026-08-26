@@ -1,34 +1,33 @@
 # Hatch: Installation and Operations Guide
 
-Hatch gives a headless Linux server a small Chromium desktop over RDP. It is designed for interactive OAuth flows where a CLI, MCP server, or agent starts a callback listener such as `http://127.0.0.1:8765/callback`.
+Hatch gives a headless Linux server a small Chromium desktop in the browser. It is designed for interactive OAuth flows where a CLI, MCP server, or agent starts a callback listener such as `http://127.0.0.1:8765/callback`.
 
 ## Architecture
 
 ```text
-Mac / PC / iPad
+Browser
+  |
+  | HTTPS
+  v
+Docker: hatch
+  |
+  +-- nginx :443
       |
-      | RDP over Tailscale, VPN, or SSH
-      v
-Linux server
-  |
-  +-- MCP/CLI --> 127.0.0.1:<callback-port>
-  |
-  +-- Docker --network=host
-        |
-        +-- xrdp -> Xorg -> Openbox -> Chromium
-                         |
-                         +--> 127.0.0.1:<callback-port>
+      +-- Guacamole :8080
+          |
+          +-- guacd :4822
+              |
+              +-- xrdp 127.0.0.1:3389 -> Xorg -> Openbox -> Chromium
 ```
 
-Host networking is essential. Chromium shares the Linux host network namespace, so a redirect to loopback reaches the OAuth callback process running directly on the server.
+For OAuth callback mode, run the container with Docker host networking so Chromium's `127.0.0.1` is the Linux host's loopback interface.
 
 ## Requirements
 
 - Linux host with Docker Engine
-- Docker Compose v2
 - About 1 GB free memory while Chromium runs
 - Private connectivity through Tailscale, another VPN, or SSH
-- An RDP client
+- A browser that can accept a self-signed certificate, unless you provide your own TLS certificate
 
 ## Install
 
@@ -38,36 +37,29 @@ cd hatch
 docker build -t hatch:local .
 ```
 
-Generate an RDP password before starting the container:
+Hatch generates an RDP password at container startup when `RDP_PASSWORD` is not set. Guacamole uses the same credentials by default.
 
-```bash
-if command -v openssl >/dev/null 2>&1; then
-  RDP_PASSWORD="$(openssl rand -hex 24)"
-elif command -v python3 >/dev/null 2>&1; then
-  RDP_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_hex(24))')"
-else
-  echo "Install openssl or python3 to generate an RDP password." >&2
-  exit 1
-fi
-printf 'RDP user: oauth\nRDP password: %s\n' "$RDP_PASSWORD"
-```
-
-Treat the password as a secret.
-
-## Start and stop
+## Start and Stop
 
 ```bash
 docker run -d \
   --name hatch \
-  --network host \
+  -p 8443:443 \
   --restart unless-stopped \
   --shm-size=1g \
   --security-opt no-new-privileges:true \
   -e RDP_USER=oauth \
-  -e RDP_PASSWORD="$RDP_PASSWORD" \
   hatch:local
 docker ps --filter name=hatch
-docker logs -f hatch
+docker logs hatch
+```
+
+Open `https://<server>:8443/guacamole/` and sign in with the `Guacamole user` and `Guacamole password` printed by `docker logs hatch`.
+
+The generated RDP credentials are also written inside the container:
+
+```bash
+docker exec hatch cat /var/log/hatch/rdp-credentials.log
 ```
 
 Stop Hatch with:
@@ -77,21 +69,7 @@ docker stop hatch
 docker rm hatch
 ```
 
-## Secure RDP access
-
-Do not expose TCP/3389 directly to the public Internet.
-
-With Tailscale, connect your RDP client to the server's Tailscale address on port 3389. Restrict the port with Tailscale grants/ACLs and the host firewall.
-
-An SSH tunnel is another option:
-
-```bash
-ssh -L 13389:127.0.0.1:3389 user@server
-```
-
-Then point your RDP client at `127.0.0.1:13389`.
-
-## Complete an OAuth login
+## OAuth Callback Mode
 
 Start the OAuth flow in your normal SSH shell:
 
@@ -99,77 +77,17 @@ Start the OAuth flow in your normal SSH shell:
 my-mcp-server login
 ```
 
-When it prints an authorization URL and waits for its local callback, connect to Hatch using RDP. Chromium starts automatically. Paste the authorization URL into Chromium and complete authentication.
+When it prints an authorization URL and waits for its local callback, open Hatch in your browser. Paste the authorization URL into Chromium and complete authentication.
 
-The provider can redirect to a URL such as:
+If the provider redirects to a URL such as:
 
 ```text
 http://127.0.0.1:8765/callback?code=...
 ```
 
-Because Hatch uses `network_mode: host`, that request reaches the listener on the Linux host. The callback port does not need to be exposed publicly.
-
-## Why bridge networking is not used
-
-With normal Docker bridge networking, container `127.0.0.1` and host `127.0.0.1` are different network namespaces. That breaks OAuth clients which require a loopback redirect. Do not replace `network_mode: host` with a simple `ports:` mapping for this use case.
-
-## Chromium sandbox
-
-Hatch keeps Chromium's sandbox enabled. If an unusually restrictive host prevents Chromium from starting, diagnose the host first. As a last resort, set this in `.env`:
-
-```dotenv
-CHROMIUM_EXTRA_FLAGS=--no-sandbox
-```
-
-Disabling the sandbox reduces browser security.
-
-## Browser persistence
-
-Hatch is disposable by default. Browser cookies and sessions disappear when the container is replaced. If persistent sessions are required, mount `/home/oauth/.config/chromium` as a Docker volume. Persistent browser profiles contain sensitive authentication material and must be protected accordingly.
-
-## Troubleshooting
-
-Check Hatch:
+run Hatch with host networking:
 
 ```bash
-docker compose ps
-docker compose logs hatch
-docker exec hatch ps aux
-```
-
-Verify host networking:
-
-```bash
-docker inspect hatch --format '{{.HostConfig.NetworkMode}}'
-```
-
-The result should be `host`.
-
-Verify the OAuth listener from the Linux host:
-
-```bash
-ss -lntp | grep 8765
-```
-
-From the xterm inside Hatch, test it with:
-
-```bash
-curl -v http://127.0.0.1:8765/
-```
-
-A protocol-specific `400` or `404` can still prove connectivity. `Connection refused` means nothing is listening on that address and port.
-
-## Updating
-
-```bash
-git pull
-docker build --pull -t hatch:local .
-if [ -z "${RDP_PASSWORD:-}" ]; then
-  echo "Set RDP_PASSWORD before restarting Hatch." >&2
-  exit 1
-fi
-docker stop hatch
-docker rm hatch
 docker run -d \
   --name hatch \
   --network host \
@@ -177,33 +95,160 @@ docker run -d \
   --shm-size=1g \
   --security-opt no-new-privileges:true \
   -e RDP_USER=oauth \
-  -e RDP_PASSWORD="$RDP_PASSWORD" \
+  -e HATCH_HTTPS_PORT=8443 \
   hatch:local
 ```
 
-Rebuild regularly so the image receives Chromium and Debian security updates.
+Open `https://<server>:8443/guacamole/`. Docker host networking ignores `-p`, so `HATCH_HTTPS_PORT` controls the host port in this mode.
 
-## Docker Compose option
+## TLS
 
-If you prefer Docker Compose:
+By default Hatch generates a self-signed certificate in `/etc/hatch/tls`. Set these variables to customize it:
+
+```dotenv
+HATCH_TLS_CN=hatch.local
+HATCH_TLS_DAYS=365
+```
+
+To provide your own certificate:
+
+```bash
+docker run -d \
+  --name hatch \
+  -p 8443:443 \
+  -v /srv/hatch/tls:/tls:ro \
+  -e HATCH_TLS_CERT=/tls/fullchain.pem \
+  -e HATCH_TLS_KEY=/tls/privkey.pem \
+  hatch:local
+```
+
+Certbot HTTP-01 validation requires public port 80. Use DNS-01 validation if you need certificate issuance without opening port 80, or terminate TLS in a reverse proxy that already owns certificate renewal.
+
+## Configuration
+
+```dotenv
+RDP_USER=oauth
+RDP_PASSWORD=
+GUAC_USER=
+GUAC_PASSWORD=
+HATCH_HTTPS_PORT=443
+HATCH_START_URL=about:blank
+CHROMIUM_EXTRA_FLAGS=
+HATCH_TLS_CERT=/etc/hatch/tls/hatch.crt
+HATCH_TLS_KEY=/etc/hatch/tls/hatch.key
+HATCH_TLS_CN=hatch.local
+HATCH_TLS_DAYS=365
+```
+
+Leave `RDP_PASSWORD` blank to generate a password at startup. Leave `GUAC_USER` and `GUAC_PASSWORD` blank to reuse the RDP credentials for Guacamole.
+
+## Docker Compose Option
 
 ```bash
 cp .env.example .env
-```
-
-Edit `.env` and set a long random `RDP_PASSWORD`, then start Hatch:
-
-```bash
 docker compose up -d --build
 docker compose ps
-docker compose logs -f hatch
+docker compose logs hatch
 ```
+
+The compose file maps host port `${HATCH_HTTPS_HOST_PORT:-8443}` to container port `${HATCH_HTTPS_PORT:-443}`.
 
 Stop Hatch with:
 
 ```bash
 docker compose down
 ```
+
+Use the explicit `docker run --network host` command for OAuth callback mode because compose port mappings are ignored when host networking is enabled.
+
+## Troubleshooting
+
+Check Hatch:
+
+```bash
+docker ps --filter name=hatch
+docker logs hatch
+docker exec hatch ps aux
+```
+
+Verify the HTTPS endpoint:
+
+```bash
+curl -kI https://127.0.0.1:8443/guacamole/
+```
+
+Verify listeners inside the container:
+
+```bash
+docker exec hatch ss -ltnp
+```
+
+Expected internal ports:
+
+```text
+0.0.0.0:443          nginx HTTPS
+127.0.0.1:4822      guacd
+127.0.0.1:3389      xrdp
+*:8080              Guacamole Tomcat
+```
+
+Verify the OAuth listener from the Linux host:
+
+```bash
+ss -lntp | grep 8765
+```
+
+From an xterm inside Hatch, test it with:
+
+```bash
+curl -v http://127.0.0.1:8765/
+```
+
+A protocol-specific `400` or `404` can still prove connectivity. `Connection refused` means nothing is listening on that address and port.
+
+## Chromium Sandbox
+
+Hatch keeps Chromium's sandbox enabled when the container runtime allows it. If the container is started with `--security-opt no-new-privileges:true`, Chromium cannot use its setuid sandbox, so Hatch automatically adds `--no-sandbox` for that session.
+
+If an unusually restrictive host still prevents Chromium from starting, diagnose the host first. As a last resort, set:
+
+```dotenv
+CHROMIUM_EXTRA_FLAGS=--no-sandbox
+```
+
+Disabling the sandbox reduces browser security.
+
+## Browser Persistence
+
+Hatch is disposable by default. Browser cookies and sessions disappear when the container is replaced. If persistent sessions are required, mount `/home/oauth/.config/chromium` as a Docker volume. Persistent browser profiles contain sensitive authentication material and must be protected accordingly.
+
+## Updating
+
+```bash
+git pull
+docker build --pull -t hatch:local .
+docker stop hatch
+docker rm hatch
+docker run -d \
+  --name hatch \
+  -p 8443:443 \
+  --restart unless-stopped \
+  --shm-size=1g \
+  --security-opt no-new-privileges:true \
+  -e RDP_USER=oauth \
+  hatch:local
+docker logs hatch
+```
+
+Rebuild regularly so the image receives Chromium, Guacamole, and Debian security updates.
+
+## E2E Guacamole Test
+
+```bash
+scripts/e2e-guacamole.sh
+```
+
+It builds Hatch, starts one temporary HTTPS container, logs into Guacamole with Playwright, opens the Hatch RDP connection, and verifies Chromium opens `https://www.google.com`.
 
 ## GitHub Container Registry
 
@@ -213,6 +258,6 @@ The included `.github/workflows/docker.yml` builds the image on pull requests an
 ghcr.io/everydaydevopsio/hatch
 ```
 
-## Recommended operating model
+## Recommended Operating Model
 
-Use Hatch only over a private network or SSH tunnel. Keep its Chromium profile ephemeral. Use a long random RDP password. Start Hatch when interactive authentication is needed and stop it afterward. OAuth access and refresh tokens should remain in the MCP application's normal credential store rather than in Hatch.
+Expose only HTTPS. Keep direct RDP private inside the container. Use host networking only when the browser must reach host loopback OAuth callbacks. Keep the Chromium profile ephemeral unless persistence is required and the profile volume is protected as sensitive authentication material.
