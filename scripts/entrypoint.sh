@@ -4,7 +4,11 @@ RDP_USER="${RDP_USER:-oauth}"
 case "$RDP_USER" in *[!a-zA-Z0-9_-]*|'') echo >&2 "ERROR: invalid RDP_USER."; exit 64;; esac
 GENERATED_PASSWORD=0
 if [ -z "${RDP_PASSWORD:-}" ]; then
-  RDP_PASSWORD="$(openssl rand -hex 24)"
+  if command -v openssl >/dev/null 2>&1; then
+    RDP_PASSWORD="$(openssl rand -hex 24)"
+  else
+    RDP_PASSWORD="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
+  fi
   GENERATED_PASSWORD=1
 fi
 case "$RDP_PASSWORD" in
@@ -22,6 +26,11 @@ install -d -m 0700 /var/log/hatch
 {
   echo "Hatch RDP credentials"
   echo "Written: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  if [ "$GENERATED_PASSWORD" -eq 1 ]; then
+    echo "RDP password source: generated"
+  else
+    echo "RDP password source: RDP_PASSWORD"
+  fi
   echo "RDP user: $RDP_USER"
   echo "RDP password: $RDP_PASSWORD"
 } > /var/log/hatch/rdp-credentials.log
