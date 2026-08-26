@@ -18,6 +18,7 @@ Hatch must provide browser-based desktop access through HTTPS from the container
 - The generated Guacamole credentials are printed to container logs and usable when the container is started detached.
 - Docker users can map any host port to container port `443`, for example `-p 8443:443`.
 - Host-network OAuth callback mode remains documented for cases where Chromium must reach a callback listener on host loopback.
+- The default desktop session maps remote Super/Mac-style shortcuts such as paste, copy, and address-bar focus to the Linux Ctrl shortcuts expected by Chromium, with an environment variable to disable the mapping.
 - Default Docker and Docker Compose starts do not show Chromium's unsupported `--no-sandbox` warning.
 - The README presents the HTTPS Guacamole flow as the primary quickstart and keeps Docker Compose as a lower-priority option.
 - An E2E smoke test validates the HTTPS Guacamole login path and confirms the browser desktop starts.

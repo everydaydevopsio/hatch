@@ -92,6 +92,7 @@ GUAC_USER=
 GUAC_PASSWORD=
 HATCH_HTTPS_PORT=443
 HATCH_START_URL=about:blank
+HATCH_MAC_SHORTCUTS=1
 CHROMIUM_EXTRA_FLAGS=
 HATCH_TLS_CERT=/etc/hatch/tls/hatch.crt
 HATCH_TLS_KEY=/etc/hatch/tls/hatch.key
@@ -100,6 +101,8 @@ HATCH_TLS_DAYS=365
 ```
 
 Leave `RDP_PASSWORD` blank to generate a random password. Leave `GUAC_USER` and `GUAC_PASSWORD` blank to reuse the RDP credentials for the Guacamole login.
+
+`HATCH_MAC_SHORTCUTS=1` maps remote `Super`/Mac-style shortcuts such as `Cmd+V`, `Cmd+C`, and `Cmd+L` to the Linux `Ctrl` shortcuts expected by Chromium. Set it to `0` to disable this shortcut bridge.
 
 To use your own certificate, mount the certificate and key into the container and set `HATCH_TLS_CERT` and `HATCH_TLS_KEY`.
 
