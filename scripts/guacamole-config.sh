@@ -40,6 +40,7 @@ server {
     ssl_certificate_key $TLS_KEY;
     ssl_protocols TLSv1.2 TLSv1.3;
     absolute_redirect off;
+    error_page 497 =301 https://\$http_host\$request_uri;
 
     access_log /dev/stdout;
     error_log /dev/stderr warn;
