@@ -45,7 +45,7 @@ server {
     error_log /dev/stderr warn;
 
     location = / {
-        return 302 https://\$http_host/guacamole/;
+        return 302 /guacamole/;
     }
 
     location /guacamole/ {

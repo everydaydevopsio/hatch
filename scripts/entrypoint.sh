@@ -21,7 +21,8 @@ install -d -o "$RDP_USER" -g "$RDP_USER" -m 0700 "/home/$RDP_USER/.config"
 install -d -o "$RDP_USER" -g "$RDP_USER" -m 0700 "/home/$RDP_USER/.cache"
 install -d -m 0755 /etc/hatch
 printf '%s\n' "${HATCH_START_URL:-about:blank}" > /etc/hatch/start-url
-chmod 0644 /etc/hatch/start-url
+chown "$RDP_USER:$RDP_USER" /etc/hatch/start-url
+chmod 0600 /etc/hatch/start-url
 install -d -m 0700 /var/log/hatch
 {
   echo "Hatch RDP credentials"
@@ -44,8 +45,7 @@ export RDP_USER RDP_PASSWORD HATCH_HTTPS_PORT HATCH_START_URL CHROMIUM_EXTRA_FLA
 echo "Hatch starting"
 echo "RDP user: $RDP_USER"
 if [ "$GENERATED_PASSWORD" -eq 1 ]; then
-  echo "Generated RDP password: $RDP_PASSWORD"
-  echo "Generated RDP credentials were also written to /var/log/hatch/rdp-credentials.log"
+  echo "Generated RDP credentials were printed as Guacamole credentials and written to /var/log/hatch/rdp-credentials.log"
 else
   echo "Using RDP password from RDP_PASSWORD"
   echo "RDP credentials were also written to /var/log/hatch/rdp-credentials.log"

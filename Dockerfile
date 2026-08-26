@@ -1,6 +1,7 @@
 FROM debian:12-slim AS guacd-builder
 
 ARG GUACAMOLE_VERSION=1.6.0
+ARG GUACAMOLE_SERVER_SHA256=8bc45675da96d7b6f39728160181e3d4ff3c08f460f6d26de5805b642bf13f2b
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -23,6 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       uuid-dev \
       wget \
     && wget -O /tmp/guacamole-server.tar.gz "https://archive.apache.org/dist/guacamole/${GUACAMOLE_VERSION}/source/guacamole-server-${GUACAMOLE_VERSION}.tar.gz" \
+    && echo "${GUACAMOLE_SERVER_SHA256}  /tmp/guacamole-server.tar.gz" | sha256sum -c - \
     && mkdir -p /tmp/guacamole-server \
     && tar -xzf /tmp/guacamole-server.tar.gz -C /tmp/guacamole-server --strip-components=1 \
     && cd /tmp/guacamole-server \
