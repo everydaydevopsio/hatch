@@ -20,9 +20,9 @@ install -d -m 0700 /var/log/hatch
 } > /var/log/hatch/rdp-credentials.log
 chmod 0600 /var/log/hatch/rdp-credentials.log
 if [ ! -s /etc/xrdp/key.pem ] || [ ! -s /etc/xrdp/cert.pem ]; then xrdp-keygen xrdp auto >/dev/null 2>&1 || true; fi
-mkdir -p /run/xrdp /run/dbus
+mkdir -p /run/xrdp
 chmod 0755 /run/xrdp
-rm -f /run/xrdp/xrdp.pid /run/xrdp/xrdp-sesman.pid /run/dbus/pid
+rm -f /run/xrdp/xrdp.pid /run/xrdp/xrdp-sesman.pid
 echo "Hatch starting"
 echo "RDP user: $RDP_USER"
 if [ "$GENERATED_PASSWORD" -eq 1 ]; then

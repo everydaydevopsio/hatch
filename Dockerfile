@@ -22,7 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       xrdp \
       xterm \
     && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /run/xrdp /run/dbus /var/log/supervisor \
+    && mkdir -p /run/xrdp /var/log/supervisor \
     && chmod 0755 /run/xrdp
 
 RUN adduser xrdp ssl-cert || true
