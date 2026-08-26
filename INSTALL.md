@@ -154,7 +154,7 @@ docker compose ps
 docker compose logs hatch
 ```
 
-The compose file maps host port `${HATCH_HTTPS_HOST_PORT:-8443}` to container port `${HATCH_HTTPS_PORT:-443}`.
+The compose file uses host networking and listens on `${HATCH_HTTPS_PORT:-8443}` directly on the host.
 
 Stop Hatch with:
 
@@ -162,7 +162,7 @@ Stop Hatch with:
 docker compose down
 ```
 
-Use the explicit `docker run --network host` command for OAuth callback mode because compose port mappings are ignored when host networking is enabled.
+The compose file uses host networking for OAuth callback mode. Open `https://<server>:8443/guacamole/` unless you set a different `HATCH_HTTPS_PORT`. Hatch listens on `HATCH_HTTPS_PORT` directly on the host. This is required for callback URLs such as `http://127.0.0.1:40397/callback/...` because Chromium is running inside the Hatch container and must see the Linux host's loopback interface.
 
 ## Troubleshooting
 
