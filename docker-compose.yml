@@ -5,15 +5,14 @@ services:
     image: hatch:local
     container_name: hatch
     restart: unless-stopped
-    ports:
-      - "${HATCH_HTTPS_HOST_PORT:-8443}:${HATCH_HTTPS_PORT:-443}"
+    network_mode: host
     shm_size: "1gb"
     environment:
       RDP_USER: ${RDP_USER:-oauth}
       RDP_PASSWORD: ${RDP_PASSWORD:-}
       GUAC_USER: ${GUAC_USER:-}
       GUAC_PASSWORD: ${GUAC_PASSWORD:-}
-      HATCH_HTTPS_PORT: ${HATCH_HTTPS_PORT:-443}
+      HATCH_HTTPS_PORT: ${HATCH_HTTPS_PORT:-8443}
       HATCH_START_URL: ${HATCH_START_URL:-about:blank}
       HATCH_MAC_SHORTCUTS: ${HATCH_MAC_SHORTCUTS:-1}
       CHROMIUM_EXTRA_FLAGS: ${CHROMIUM_EXTRA_FLAGS:-}
