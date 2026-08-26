@@ -122,9 +122,34 @@ docker compose down
 
 ## Browser access with Guacamole
 
-RDP does not run directly over HTTPS. To use Hatch from a browser, run Apache Guacamole in front of the Hatch RDP service and expose Guacamole through HTTPS with your normal reverse proxy or load balancer.
+RDP does not run directly over HTTPS, so opening `http://<server>:3389/` in a browser will not work. To use Hatch from a browser, run Apache Guacamole in front of the Hatch RDP service and expose Guacamole through HTTPS with your normal reverse proxy or load balancer.
 
-Use the Guacamole E2E test below as the reference wiring: Hatch, `guacd`, Guacamole, and Postgres run on the same Docker network, and Guacamole connects to Hatch on TCP/3389 with the generated RDP password from the Hatch logs.
+The production shape is:
+
+```text
+Browser
+   |
+   | HTTPS
+   v
+Reverse proxy / load balancer
+   |
+   | HTTP to Guacamole
+   v
+Guacamole web app -> guacd -> Hatch RDP on TCP/3389
+```
+
+Configure the Guacamole connection with:
+
+- Protocol: `RDP`
+- Hostname: the Linux host address that exposes Hatch on TCP/3389
+- Port: `3389`
+- Username: the `RDP_USER` value, `oauth` by default
+- Password: the generated password from `docker logs hatch` or `/var/log/hatch/rdp-credentials.log`
+- Ignore server certificate: enabled
+
+Keep TCP/3389 private to the host, VPN, or container network. Only the Guacamole HTTPS endpoint should be exposed to browser users.
+
+Use the Guacamole E2E test below as the reference wiring for automation: Hatch, `guacd`, Guacamole, and Postgres run on the same Docker network, and Guacamole connects to Hatch on TCP/3389 with the generated RDP password from the Hatch logs.
 
 ## E2E Guacamole test
 
