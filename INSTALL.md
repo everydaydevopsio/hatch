@@ -56,6 +56,15 @@ docker logs hatch
 
 Open `https://<server>:8443/guacamole/` and sign in with the `Guacamole user` and `Guacamole password` printed by `docker logs hatch`.
 
+### Pasting Text from iPad
+
+On an iPad, Guacamole hides its side menu while the remote desktop is open. To paste text into the Hatch desktop:
+
+1. Swipe from the left edge of the Guacamole screen toward the right to open the Guacamole side menu.
+2. Paste or type the text into the Guacamole clipboard text box.
+3. Tap back into the remote Chromium desktop.
+4. Paste in Chromium with the on-screen keyboard shortcut, a hardware keyboard shortcut, or the browser text field's paste action.
+
 The generated RDP credentials are also written inside the container:
 
 ```bash
