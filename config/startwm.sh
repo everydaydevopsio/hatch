@@ -8,6 +8,24 @@ export XDG_CACHE_HOME="$HOME/.cache"
 export XDG_RUNTIME_DIR="/tmp/runtime-$USER_NAME"
 mkdir -p "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_RUNTIME_DIR"
 chmod 700 "$XDG_RUNTIME_DIR"
+OPENBOX_CONFIG_DIR="$XDG_CONFIG_HOME/openbox"
+OPENBOX_RC="$OPENBOX_CONFIG_DIR/rc.xml"
+mkdir -p "$OPENBOX_CONFIG_DIR"
+if [ ! -f "$OPENBOX_RC" ]; then
+  if [ -f /etc/xdg/openbox/rc.xml ]; then
+    cp /etc/xdg/openbox/rc.xml "$OPENBOX_RC"
+  else
+    cat > "$OPENBOX_RC" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<openbox_config xmlns="http://openbox.org/3.4/rc">
+  <desktops>
+    <number>1</number>
+  </desktops>
+</openbox_config>
+EOF
+  fi
+fi
+sed -i '0,/<number>[0-9][0-9]*<\/number>/s//<number>1<\/number>/' "$OPENBOX_RC"
 case "${HATCH_MAC_SHORTCUTS:-1}" in
   1|true|TRUE|yes|YES|on|ON)
     if command -v xbindkeys >/dev/null 2>&1 && command -v xdotool >/dev/null 2>&1; then
