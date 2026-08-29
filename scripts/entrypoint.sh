@@ -15,6 +15,10 @@ case "$RDP_PASSWORD" in
   *:*|*'
 '*) echo >&2 "ERROR: RDP_PASSWORD must not contain ':' or newlines."; exit 64;;
 esac
+if printf '%s' "$RDP_PASSWORD" | LC_ALL=C grep -q '[[:cntrl:]]'; then
+  echo >&2 "ERROR: RDP_PASSWORD must not contain control characters."
+  exit 64
+fi
 if ! id "$RDP_USER" >/dev/null 2>&1; then useradd --create-home --shell /bin/bash "$RDP_USER"; fi
 printf '%s:%s\n' "$RDP_USER" "$RDP_PASSWORD" | chpasswd
 install -d -o "$RDP_USER" -g "$RDP_USER" -m 0700 "/home/$RDP_USER/.config"
@@ -40,16 +44,16 @@ if [ ! -s /etc/xrdp/key.pem ] || [ ! -s /etc/xrdp/cert.pem ]; then xrdp-keygen x
 mkdir -p /run/xrdp
 chmod 0755 /run/xrdp
 rm -f /run/xrdp/xrdp.pid /run/xrdp/xrdp-sesman.pid
-export RDP_USER RDP_PASSWORD HATCH_HTTPS_PORT HATCH_START_URL HATCH_MAC_SHORTCUTS CHROMIUM_EXTRA_FLAGS GUACAMOLE_HOME GUACD_HOSTNAME GUACD_PORT WEBAPP_CONTEXT
+export RDP_USER RDP_PASSWORD HATCH_HTTPS_PORT HATCH_START_URL HATCH_MAC_SHORTCUTS HATCH_GUAC_JWT_SECRET HATCH_GUAC_LAUNCH_TTL_SECONDS CHROMIUM_EXTRA_FLAGS GUACAMOLE_HOME GUACD_HOSTNAME GUACD_PORT WEBAPP_CONTEXT
 /usr/local/bin/hatch-guacamole-config
 echo "Hatch starting"
 echo "RDP user: $RDP_USER"
 if [ "$GENERATED_PASSWORD" -eq 1 ]; then
-  echo "Generated RDP credentials were printed as Guacamole credentials and written to /var/log/hatch/rdp-credentials.log"
+  echo "Generated RDP credentials were written to /var/log/hatch/rdp-credentials.log"
 else
   echo "Using RDP password from RDP_PASSWORD"
   echo "RDP credentials were also written to /var/log/hatch/rdp-credentials.log"
 fi
-echo "HTTPS access: publish container port ${HATCH_HTTPS_PORT:-443}, for example -p 8443:${HATCH_HTTPS_PORT:-443}"
+echo "HTTPS access: publish container port ${HATCH_HTTPS_PORT:-443}, for example -p 8443:${HATCH_HTTPS_PORT:-443}, then open the Hatch access URL from these logs"
 echo "OAuth callback note: use Docker host networking only when Chromium must reach services on host loopback"
 exec "$@"

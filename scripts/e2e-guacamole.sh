@@ -67,9 +67,11 @@ if ! nc -z 127.0.0.1 "$HTTPS_PORT" >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! curl -kfsS "https://127.0.0.1:${HTTPS_PORT}/guacamole/" >/dev/null; then
+GUAC_REDIRECT_LOCATION="$(curl -ksSI "https://127.0.0.1:${HTTPS_PORT}/guacamole/" 2>/dev/null | sed -n 's/^[Ll]ocation: //p' | tr -d '\r' | tail -n 1 || true)"
+if [ "$GUAC_REDIRECT_LOCATION" != "/hatch/" ]; then
   docker logs "${PREFIX}-hatch" >&2 || true
-  echo "ERROR: Guacamole did not respond through HTTPS." >&2
+  echo "ERROR: Direct Guacamole access without a token did not redirect to /hatch/." >&2
+  echo "Observed Location: ${GUAC_REDIRECT_LOCATION:-<none>}" >&2
   exit 1
 fi
 
@@ -81,11 +83,10 @@ if [ "$HTTP_REDIRECT_LOCATION" != "https://127.0.0.1:${HTTPS_PORT}/" ]; then
   exit 1
 fi
 
-GUAC_USER="$(docker logs "${PREFIX}-hatch" 2>&1 | sed -n 's/^Guacamole user: //p' | tail -n 1)"
-GUAC_PASSWORD="$(docker logs "${PREFIX}-hatch" 2>&1 | sed -n 's/^Guacamole password: //p' | tail -n 1)"
-if [ -z "$GUAC_USER" ] || [ -z "$GUAC_PASSWORD" ]; then
+HATCH_ACCESS_PATH="$(docker logs "${PREFIX}-hatch" 2>&1 | sed -n 's/^Hatch access path: //p' | tail -n 1)"
+if [ -z "$HATCH_ACCESS_PATH" ]; then
   docker logs "${PREFIX}-hatch" >&2 || true
-  echo "ERROR: Could not extract generated Guacamole credentials from Hatch logs." >&2
+  echo "ERROR: Could not extract generated Hatch access path from container logs." >&2
   exit 1
 fi
 
@@ -93,8 +94,7 @@ cat > "$TMP_DIR/guac-smoke.mjs" <<'JS'
 import { chromium } from 'playwright';
 
 const baseUrl = process.env.GUAC_URL;
-const username = process.env.GUAC_USER;
-const password = process.env.GUAC_PASSWORD;
+const accessPath = process.env.HATCH_ACCESS_PATH;
 
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({
@@ -103,13 +103,10 @@ const context = await browser.newContext({
 });
 const page = await context.newPage();
 
-await page.goto(`${baseUrl}/guacamole/`, { waitUntil: 'domcontentloaded' });
-await page.getByLabel(/username/i).fill(username);
-await page.getByLabel(/password/i).fill(password);
-await page.getByRole('button', { name: /login/i }).click();
+await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
+await page.getByText(/generated access URL/i).waitFor({ timeout: 10000 });
 
-const clientId = Buffer.from('Hatch\0c\0default').toString('base64').replace(/=/g, '');
-await page.goto(`${baseUrl}/guacamole/#/client/${clientId}`, { waitUntil: 'domcontentloaded' });
+await page.goto(`${baseUrl}${accessPath}`, { waitUntil: 'domcontentloaded' });
 await page.locator('canvas').first().waitFor({ timeout: 60000 });
 await page.waitForTimeout(5000);
 
@@ -117,8 +114,7 @@ await browser.close();
 JS
 
 GUAC_URL="https://127.0.0.1:${HTTPS_PORT}" \
-GUAC_USER="$GUAC_USER" \
-GUAC_PASSWORD="$GUAC_PASSWORD" \
+HATCH_ACCESS_PATH="$HATCH_ACCESS_PATH" \
   sh -c 'cd "$1" && npm init -y >/dev/null && npm install playwright@1.57.0 >/dev/null && npx playwright install chromium >/dev/null && node guac-smoke.mjs' sh "$TMP_DIR" || {
     echo "ERROR: Playwright could not complete the Guacamole desktop flow." >&2
     echo "---- Hatch listeners ----" >&2

@@ -37,7 +37,7 @@ cd hatch
 docker build -t hatch:local .
 ```
 
-Hatch generates an RDP password at container startup when `RDP_PASSWORD` is not set. Guacamole uses the same credentials by default.
+Hatch generates an RDP password at container startup when `RDP_PASSWORD` is not set. Guacamole access is launched with a signed JWT instead of a reusable Guacamole username/password.
 
 ## Start and Stop
 
@@ -54,7 +54,9 @@ docker ps --filter name=hatch
 docker logs hatch
 ```
 
-Open `https://<server>:8443/guacamole/` and sign in with the `Guacamole user` and `Guacamole password` printed by `docker logs hatch`.
+Copy the generated `Hatch access URL` from `docker logs hatch`. If the printed URL contains `<host>`, replace it with your server name or IP and adjust the port if you mapped container port `443` to a different host port.
+
+Open `https://<server>:8443/hatch/?token=<jwt>`. Hatch starts a Guacamole session with the signed JWT and opens the browser desktop without a Guacamole username/password prompt. Treat the access URL and container logs as sensitive because the bearer token grants desktop access until it expires. Direct visits to `/guacamole/` without a token land on the Hatch page instead of the Guacamole login page.
 
 ### Pasting Text from iPad
 
@@ -108,7 +110,7 @@ docker run -d \
   hatch:local
 ```
 
-Open `https://<server>:8443/guacamole/`. Docker host networking ignores `-p`, so `HATCH_HTTPS_PORT` controls the host port in this mode.
+Open the generated `Hatch access URL` from `docker logs hatch`. Docker host networking ignores `-p`, so `HATCH_HTTPS_PORT` controls the host port in this mode.
 
 ## TLS
 
@@ -138,8 +140,8 @@ Certbot HTTP-01 validation requires public port 80. Use DNS-01 validation if you
 ```dotenv
 RDP_USER=oauth
 RDP_PASSWORD=
-GUAC_USER=
-GUAC_PASSWORD=
+HATCH_GUAC_JWT_SECRET=
+HATCH_GUAC_LAUNCH_TTL_SECONDS=43200
 HATCH_HTTPS_PORT=443
 HATCH_START_URL=about:blank
 HATCH_MAC_SHORTCUTS=1
@@ -150,7 +152,7 @@ HATCH_TLS_CN=hatch.local
 HATCH_TLS_DAYS=365
 ```
 
-Leave `RDP_PASSWORD` blank to generate a password at startup. Leave `GUAC_USER` and `GUAC_PASSWORD` blank to reuse the RDP credentials for Guacamole.
+Leave `RDP_PASSWORD` blank to generate a password at startup. Leave `HATCH_GUAC_JWT_SECRET` blank to generate a per-container signing secret for Guacamole JWT authentication. `HATCH_GUAC_LAUNCH_TTL_SECONDS` controls how long the generated Hatch access URL remains valid.
 
 `HATCH_MAC_SHORTCUTS=1` maps remote `Super`/Mac-style shortcuts such as `Cmd+V`, `Cmd+C`, and `Cmd+L` to the Linux `Ctrl` shortcuts expected by Chromium. Set it to `0` to disable this shortcut bridge.
 
@@ -171,7 +173,7 @@ Stop Hatch with:
 docker compose down
 ```
 
-The compose file uses host networking for OAuth callback mode. Open `https://<server>:8443/guacamole/` unless you set a different `HATCH_HTTPS_PORT`. Hatch listens on `HATCH_HTTPS_PORT` directly on the host. This is required for callback URLs such as `http://127.0.0.1:40397/callback/...` because Chromium is running inside the Hatch container and must see the Linux host's loopback interface.
+The compose file uses host networking for OAuth callback mode. Open the generated `Hatch access URL` from `docker compose logs hatch` unless you set a different `HATCH_HTTPS_PORT`. Hatch listens on `HATCH_HTTPS_PORT` directly on the host. This is required for callback URLs such as `http://127.0.0.1:40397/callback/...` because Chromium is running inside the Hatch container and must see the Linux host's loopback interface.
 
 ## Troubleshooting
 
@@ -186,6 +188,7 @@ docker exec hatch ps aux
 Verify the HTTPS endpoint:
 
 ```bash
+curl -kI https://127.0.0.1:8443/
 curl -kI https://127.0.0.1:8443/guacamole/
 ```
 
@@ -260,7 +263,7 @@ Rebuild regularly so the image receives Chromium, Guacamole, and Debian security
 scripts/e2e-guacamole.sh
 ```
 
-It builds Hatch, starts one temporary HTTPS container, logs into Guacamole with Playwright, opens the Hatch RDP connection, and verifies Chromium opens `https://www.google.com`.
+It builds Hatch, starts one temporary HTTPS container, confirms direct `/guacamole/` access redirects to Hatch, launches Guacamole through the generated JWT-backed Hatch URL with Playwright, opens the Hatch RDP connection, and verifies Chromium opens `https://www.google.com`.
 
 ## GitHub Container Registry
 
