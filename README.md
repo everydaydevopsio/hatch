@@ -24,6 +24,7 @@ cd hatch
 
 docker build -t hatch:local .
 
+# Optional: set HATCH_START_URL when Chromium should open a specific page.
 docker run -d \
   --name hatch \
   -p 8443:443 \
@@ -149,7 +150,7 @@ Run the smoke test from the repository root:
 scripts/e2e-guacamole.sh
 ```
 
-The test builds Hatch, starts one temporary container, waits for HTTPS health, confirms direct `/guacamole/` access redirects to Hatch, launches Guacamole through the generated JWT-backed Hatch URL with Playwright, opens the Hatch connection, and verifies Chromium starts at `${HATCH_E2E_URL:-https://www.google.com}`.
+The test builds Hatch, starts one temporary container, waits for HTTPS health, confirms direct `/guacamole/` access redirects to Hatch, launches Guacamole through the generated JWT-backed Hatch URL with Playwright, opens the Hatch connection, sets `HATCH_START_URL` from `${HATCH_E2E_URL:-https://www.google.com}`, and verifies Chromium starts at that value.
 
 Required host tools:
 

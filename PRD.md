@@ -25,4 +25,4 @@ Hatch must provide browser-based desktop access through HTTPS from the container
 - Operators can set `HATCH_START_URL` so Chromium opens the requested URL when the desktop session starts; the default remains `about:blank`.
 - Default Docker and Docker Compose starts do not show Chromium's unsupported `--no-sandbox` warning.
 - The README presents the HTTPS Guacamole flow as the primary quickstart and keeps Docker Compose as a lower-priority option.
-- An E2E smoke test validates the HTTPS Guacamole login path and confirms the browser desktop starts at the configured `HATCH_START_URL`.
+- An E2E smoke test validates the HTTPS Guacamole login path and confirms the browser desktop starts at the configured `HATCH_START_URL`, using `HATCH_E2E_URL` as the test harness input that is passed through to the container.

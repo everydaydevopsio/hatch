@@ -42,6 +42,7 @@ Hatch generates an RDP password at container startup when `RDP_PASSWORD` is not 
 ## Start and Stop
 
 ```bash
+# Optional: set HATCH_START_URL when Chromium should open a specific page.
 docker run -d \
   --name hatch \
   -p 8443:443 \
@@ -248,6 +249,7 @@ git pull
 docker build --pull -t hatch:local .
 docker stop hatch
 docker rm hatch
+# Optional: set HATCH_START_URL when Chromium should open a specific page.
 docker run -d \
   --name hatch \
   -p 8443:443 \
@@ -268,7 +270,7 @@ Rebuild regularly so the image receives Chromium, Guacamole, and Debian security
 scripts/e2e-guacamole.sh
 ```
 
-It builds Hatch, starts one temporary HTTPS container, confirms direct `/guacamole/` access redirects to Hatch, launches Guacamole through the generated JWT-backed Hatch URL with Playwright, opens the Hatch RDP connection, and verifies Chromium opens `${HATCH_E2E_URL:-https://www.google.com}`.
+It builds Hatch, starts one temporary HTTPS container, confirms direct `/guacamole/` access redirects to Hatch, launches Guacamole through the generated JWT-backed Hatch URL with Playwright, opens the Hatch RDP connection, sets `HATCH_START_URL` from `${HATCH_E2E_URL:-https://www.google.com}`, and verifies Chromium opens that value.
 
 ## GitHub Container Registry
 
