@@ -31,6 +31,7 @@ docker run -d \
   --shm-size=1g \
   --security-opt no-new-privileges:true \
   -e RDP_USER=oauth \
+  -e HATCH_START_URL="https://www.google.com" \
   hatch:local
 
 docker logs hatch
@@ -117,6 +118,8 @@ HATCH_TLS_DAYS=365
 
 Leave `RDP_PASSWORD` blank to generate a random password. Leave `HATCH_GUAC_JWT_SECRET` blank to generate a per-container signing secret for Guacamole JWT authentication. `HATCH_GUAC_LAUNCH_TTL_SECONDS` controls how long the generated Hatch access URL remains valid.
 
+Set `HATCH_START_URL` to the page Chromium should open when the remote desktop session starts. The default is `about:blank`.
+
 `HATCH_MAC_SHORTCUTS=1` maps remote `Super`/Mac-style shortcuts such as `Cmd+V`, `Cmd+C`, and `Cmd+L` to the Linux `Ctrl` shortcuts expected by Chromium. Set it to `0` to disable this shortcut bridge.
 
 To use your own certificate, mount the certificate and key into the container and set `HATCH_TLS_CERT` and `HATCH_TLS_KEY`.
@@ -125,6 +128,7 @@ To use your own certificate, mount the certificate and key into the container an
 
 ```bash
 cp .env.example .env
+# Optional: edit HATCH_START_URL in .env before starting.
 docker compose up -d --build
 docker compose logs hatch
 ```
@@ -145,7 +149,7 @@ Run the smoke test from the repository root:
 scripts/e2e-guacamole.sh
 ```
 
-The test builds Hatch, starts one temporary container, waits for HTTPS health, confirms direct `/guacamole/` access redirects to Hatch, launches Guacamole through the generated JWT-backed Hatch URL with Playwright, opens the Hatch connection, and verifies Chromium starts at `https://www.google.com`.
+The test builds Hatch, starts one temporary container, waits for HTTPS health, confirms direct `/guacamole/` access redirects to Hatch, launches Guacamole through the generated JWT-backed Hatch URL with Playwright, opens the Hatch connection, and verifies Chromium starts at `${HATCH_E2E_URL:-https://www.google.com}`.
 
 Required host tools:
 
