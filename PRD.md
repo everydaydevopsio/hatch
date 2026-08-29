@@ -15,7 +15,9 @@ Hatch must provide browser-based desktop access through HTTPS from the container
 - `guacd` connects to xrdp on `127.0.0.1:3389`.
 - xrdp is not published as a direct external service by the default image.
 - A self-signed TLS certificate is generated automatically when no certificate is mounted.
-- The generated Guacamole credentials are printed to container logs and usable when the container is started detached.
+- Guacamole access is launched only from a generated signed-JWT Hatch URL instead of a reusable Guacamole username/password.
+- Direct visits to `/guacamole/` without a token land on the Hatch page instead of the Guacamole login page.
+- The generated RDP credentials are written inside the container for operator recovery, but are not printed as Guacamole login credentials.
 - Docker users can map any host port to container port `443`, for example `-p 8443:443`.
 - Host-network OAuth callback mode remains documented for cases where Chromium must reach a callback listener on host loopback.
 - Docker Compose uses host-network OAuth callback mode, listens on host port `8443` by default, and does not rely on ignored port mappings.

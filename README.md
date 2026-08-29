@@ -14,7 +14,7 @@ Browser
   -> Openbox + Chromium
 ```
 
-The container generates a self-signed HTTPS certificate and a random desktop password at startup unless you provide your own values.
+The container generates a self-signed HTTPS certificate, a random desktop password, and a Guacamole JWT signing secret at startup unless you provide your own values.
 
 ## Quick Start
 
@@ -36,13 +36,19 @@ docker run -d \
 docker logs hatch
 ```
 
-Open:
+Copy the generated `Hatch access URL` from:
 
-```text
-https://<server>:8443/guacamole/
+```bash
+docker logs hatch
 ```
 
-Accept the self-signed certificate warning, then sign in with the `Guacamole user` and `Guacamole password` printed by `docker logs hatch`. The generated RDP credentials are also written inside the container at `/var/log/hatch/rdp-credentials.log`.
+If the printed URL contains `<host>`, replace it with your server name or IP and adjust the port if you mapped container port `443` to a different host port. Open:
+
+```text
+https://<server>:8443/hatch/?token=<jwt>
+```
+
+Accept the self-signed certificate warning. Hatch starts a Guacamole session with the signed JWT and opens the browser desktop without a Guacamole username/password prompt. Direct visits to `/guacamole/` without a token land on the Hatch page instead of the Guacamole login page. The generated RDP credentials are written inside the container at `/var/log/hatch/rdp-credentials.log` for operator recovery.
 
 ### Pasting Text from iPad
 
@@ -85,7 +91,7 @@ docker run -d \
 Open:
 
 ```text
-https://<server>:8443/guacamole/
+https://<server>:8443/hatch/?token=<jwt-from-docker-logs>
 ```
 
 The RDP service is bound to loopback inside the container. Use the HTTPS Guacamole endpoint instead of connecting an RDP client directly.
@@ -97,8 +103,8 @@ Common environment variables:
 ```text
 RDP_USER=oauth
 RDP_PASSWORD=
-GUAC_USER=
-GUAC_PASSWORD=
+HATCH_GUAC_JWT_SECRET=
+HATCH_GUAC_LAUNCH_TTL_SECONDS=43200
 HATCH_HTTPS_PORT=443
 HATCH_START_URL=about:blank
 HATCH_MAC_SHORTCUTS=1
@@ -109,7 +115,7 @@ HATCH_TLS_CN=hatch.local
 HATCH_TLS_DAYS=365
 ```
 
-Leave `RDP_PASSWORD` blank to generate a random password. Leave `GUAC_USER` and `GUAC_PASSWORD` blank to reuse the RDP credentials for the Guacamole login.
+Leave `RDP_PASSWORD` blank to generate a random password. Leave `HATCH_GUAC_JWT_SECRET` blank to generate a per-container signing secret for Guacamole JWT authentication. `HATCH_GUAC_LAUNCH_TTL_SECONDS` controls how long the generated Hatch access URL remains valid.
 
 `HATCH_MAC_SHORTCUTS=1` maps remote `Super`/Mac-style shortcuts such as `Cmd+V`, `Cmd+C`, and `Cmd+L` to the Linux `Ctrl` shortcuts expected by Chromium. Set it to `0` to disable this shortcut bridge.
 
@@ -139,7 +145,7 @@ Run the smoke test from the repository root:
 scripts/e2e-guacamole.sh
 ```
 
-The test builds Hatch, starts one temporary container, waits for HTTPS health, logs into Guacamole with Playwright, opens the Hatch connection, and verifies Chromium starts at `https://www.google.com`.
+The test builds Hatch, starts one temporary container, waits for HTTPS health, confirms direct `/guacamole/` access redirects to Hatch, launches Guacamole through the generated JWT-backed Hatch URL with Playwright, opens the Hatch connection, and verifies Chromium starts at `https://www.google.com`.
 
 Required host tools:
 
