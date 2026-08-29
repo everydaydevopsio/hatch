@@ -122,6 +122,10 @@ if [ "${#HATCH_GUAC_JWT_SECRET}" -lt 32 ]; then
   echo >&2 "ERROR: HATCH_GUAC_JWT_SECRET must be at least 32 characters."
   exit 64
 fi
+if printf '%s' "$HATCH_GUAC_JWT_SECRET" | LC_ALL=C grep -q '[[:cntrl:]]'; then
+  echo >&2 "ERROR: HATCH_GUAC_JWT_SECRET must not contain control characters."
+  exit 64
+fi
 case "$HATCH_GUAC_LAUNCH_TTL_SECONDS" in
   ''|*[!0-9]*) echo >&2 "ERROR: HATCH_GUAC_LAUNCH_TTL_SECONDS must be a positive integer."; exit 64;;
 esac
@@ -205,7 +209,7 @@ cat > /etc/hatch/guacamole-launcher.html <<EOF
 </html>
 EOF
 
-chmod 0644 /etc/guacamole/guacamole.properties
+chmod 0600 /etc/guacamole/guacamole.properties
 chmod 0644 /etc/hatch/guacamole-launcher.html
 
 echo "Hatch HTTPS endpoint: container port ${HATCH_HTTPS_PORT:-443}"

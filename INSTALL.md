@@ -56,7 +56,7 @@ docker logs hatch
 
 Copy the generated `Hatch access URL` from `docker logs hatch`. If the printed URL contains `<host>`, replace it with your server name or IP and adjust the port if you mapped container port `443` to a different host port.
 
-Open `https://<server>:8443/hatch/?token=<jwt>`. Hatch starts a Guacamole session with the signed JWT and opens the browser desktop without a Guacamole username/password prompt. Direct visits to `/guacamole/` without a token land on the Hatch page instead of the Guacamole login page.
+Open `https://<server>:8443/hatch/?token=<jwt>`. Hatch starts a Guacamole session with the signed JWT and opens the browser desktop without a Guacamole username/password prompt. Treat the access URL and container logs as sensitive because the bearer token grants desktop access until it expires. Direct visits to `/guacamole/` without a token land on the Hatch page instead of the Guacamole login page.
 
 ### Pasting Text from iPad
 

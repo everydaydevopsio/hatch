@@ -15,6 +15,10 @@ case "$RDP_PASSWORD" in
   *:*|*'
 '*) echo >&2 "ERROR: RDP_PASSWORD must not contain ':' or newlines."; exit 64;;
 esac
+if printf '%s' "$RDP_PASSWORD" | LC_ALL=C grep -q '[[:cntrl:]]'; then
+  echo >&2 "ERROR: RDP_PASSWORD must not contain control characters."
+  exit 64
+fi
 if ! id "$RDP_USER" >/dev/null 2>&1; then useradd --create-home --shell /bin/bash "$RDP_USER"; fi
 printf '%s:%s\n' "$RDP_USER" "$RDP_PASSWORD" | chpasswd
 install -d -o "$RDP_USER" -g "$RDP_USER" -m 0700 "/home/$RDP_USER/.config"

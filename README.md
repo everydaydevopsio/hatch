@@ -48,7 +48,7 @@ If the printed URL contains `<host>`, replace it with your server name or IP and
 https://<server>:8443/hatch/?token=<jwt>
 ```
 
-Accept the self-signed certificate warning. Hatch starts a Guacamole session with the signed JWT and opens the browser desktop without a Guacamole username/password prompt. Direct visits to `/guacamole/` without a token land on the Hatch page instead of the Guacamole login page. The generated RDP credentials are written inside the container at `/var/log/hatch/rdp-credentials.log` for operator recovery.
+Accept the self-signed certificate warning. Hatch starts a Guacamole session with the signed JWT and opens the browser desktop without a Guacamole username/password prompt. Treat the access URL and container logs as sensitive because the bearer token grants desktop access until it expires. Direct visits to `/guacamole/` without a token land on the Hatch page instead of the Guacamole login page. The generated RDP credentials are written inside the container at `/var/log/hatch/rdp-credentials.log` for operator recovery.
 
 ### Pasting Text from iPad
 
