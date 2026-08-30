@@ -13,10 +13,10 @@ sudo install -m 0755 bin/hatch /usr/local/bin/hatch
 `make build` builds the local `hatch:local` container image before compiling the CLI, matching the image the CLI runs by default.
 Run `make setup` to verify Go, Docker, and the tools used by the E2E smoke test are available locally.
 
-Build the Hatch container image once on the server:
+Rebuild only the Hatch container image with:
 
 ```bash
-docker build -t hatch:local .
+make image
 ```
 
 The initial CLI intentionally uses `hatch:local` so the container image and CLI can evolve together without introducing registry authentication into the first implementation.
