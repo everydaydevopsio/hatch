@@ -16,7 +16,47 @@ Browser
 
 The container generates a self-signed HTTPS certificate, a random desktop password, and a Guacamole JWT signing secret at startup unless you provide your own values.
 
-## Quick Start
+## Go CLI
+
+Hatch now includes a Go CLI that manages Hatch containers through the Docker Engine API.
+
+Build it with:
+
+```bash
+go build -o hatch ./cmd/hatch
+```
+
+Check prerequisites and initialize the public hostname with:
+
+```bash
+hatch init
+hatch init devbox.tailnet.ts.net
+```
+
+The hostname is stored in:
+
+```text
+~/.config/hatch/hatch.yaml
+```
+
+Launch a browser desktop directly at a URL:
+
+```bash
+hatch 'https://example.com/oauth/authorize?...'
+```
+
+The CLI checks that Docker is installed and that the Docker daemon responds before any Docker-dependent operation. If Docker is missing, `hatch init` provides installation instructions for macOS, Windows, and Linux. On Linux it detects common distributions from `/etc/os-release`. If Docker is installed but stopped, Hatch prints platform-specific startup instructions.
+
+Additional commands:
+
+```bash
+hatch list
+hatch stop <session>
+```
+
+See [docs/CLI.md](docs/CLI.md) for details.
+
+## Quick Start Without the CLI
 
 ```bash
 git clone https://github.com/everydaydevopsio/hatch.git
@@ -161,22 +201,29 @@ Required host tools:
 ├── Dockerfile
 ├── docker-compose.yml
 ├── .env.example
+├── cmd/hatch/
+│   ├── main.go
+│   └── main_test.go
 ├── config/
 │   ├── chromium-launch.sh
 │   ├── login-shell.sh
 │   ├── startwm.sh
 │   └── supervisord.conf
+├── docs/
+│   └── CLI.md
 ├── scripts/
 │   ├── e2e-guacamole.sh
 │   ├── entrypoint.sh
 │   ├── guacamole-config.sh
 │   └── healthcheck.sh
-└── .github/workflows/docker.yml
+└── .github/workflows/
+    ├── docker.yml
+    └── go.yml
 ```
 
 ## Supported Host
 
-This project targets Linux hosts running Docker Engine. Docker Desktop behaves differently because host networking is virtualized and is not the intended deployment environment for OAuth callback mode.
+The Hatch container targets Linux Docker Engine hosts for OAuth callback mode. The Go CLI itself provides Docker prerequisite guidance on macOS, Linux, and Windows. Docker Desktop host networking is virtualized differently from a native Linux Docker Engine host, so callback behavior involving host loopback should be verified on desktop operating systems.
 
 ## Security Notes
 
