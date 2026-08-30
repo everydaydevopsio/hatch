@@ -42,6 +42,7 @@ Hatch generates an RDP password at container startup when `RDP_PASSWORD` is not 
 ## Start and Stop
 
 ```bash
+# Optional: set HATCH_START_URL when Chromium should open a specific page.
 docker run -d \
   --name hatch \
   -p 8443:443 \
@@ -49,6 +50,7 @@ docker run -d \
   --shm-size=1g \
   --security-opt no-new-privileges:true \
   -e RDP_USER=oauth \
+  -e HATCH_START_URL="https://www.google.com" \
   hatch:local
 docker ps --filter name=hatch
 docker logs hatch
@@ -154,12 +156,15 @@ HATCH_TLS_DAYS=365
 
 Leave `RDP_PASSWORD` blank to generate a password at startup. Leave `HATCH_GUAC_JWT_SECRET` blank to generate a per-container signing secret for Guacamole JWT authentication. `HATCH_GUAC_LAUNCH_TTL_SECONDS` controls how long the generated Hatch access URL remains valid.
 
+Set `HATCH_START_URL` to the page Chromium should open when the remote desktop session starts. The default is `about:blank`.
+
 `HATCH_MAC_SHORTCUTS=1` maps remote `Super`/Mac-style shortcuts such as `Cmd+V`, `Cmd+C`, and `Cmd+L` to the Linux `Ctrl` shortcuts expected by Chromium. Set it to `0` to disable this shortcut bridge.
 
 ## Docker Compose Option
 
 ```bash
 cp .env.example .env
+# Optional: edit HATCH_START_URL in .env before starting.
 docker compose up -d --build
 docker compose ps
 docker compose logs hatch
@@ -244,6 +249,7 @@ git pull
 docker build --pull -t hatch:local .
 docker stop hatch
 docker rm hatch
+# Optional: set HATCH_START_URL when Chromium should open a specific page.
 docker run -d \
   --name hatch \
   -p 8443:443 \
@@ -251,6 +257,7 @@ docker run -d \
   --shm-size=1g \
   --security-opt no-new-privileges:true \
   -e RDP_USER=oauth \
+  -e HATCH_START_URL="https://www.google.com" \
   hatch:local
 docker logs hatch
 ```
@@ -263,7 +270,7 @@ Rebuild regularly so the image receives Chromium, Guacamole, and Debian security
 scripts/e2e-guacamole.sh
 ```
 
-It builds Hatch, starts one temporary HTTPS container, confirms direct `/guacamole/` access redirects to Hatch, launches Guacamole through the generated JWT-backed Hatch URL with Playwright, opens the Hatch RDP connection, and verifies Chromium opens `https://www.google.com`.
+It builds Hatch, starts one temporary HTTPS container, confirms direct `/guacamole/` access redirects to Hatch, launches Guacamole through the generated JWT-backed Hatch URL with Playwright, opens the Hatch RDP connection, sets `HATCH_START_URL` from `${HATCH_E2E_URL:-https://www.google.com}`, and verifies Chromium opens that value.
 
 ## GitHub Container Registry
 

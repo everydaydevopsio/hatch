@@ -22,6 +22,7 @@ Hatch must provide browser-based desktop access through HTTPS from the container
 - Host-network OAuth callback mode remains documented for cases where Chromium must reach a callback listener on host loopback.
 - Docker Compose uses host-network OAuth callback mode, listens on host port `8443` by default, and does not rely on ignored port mappings.
 - The default desktop session maps remote Super/Mac-style shortcuts such as paste, copy, and address-bar focus to the Linux Ctrl shortcuts expected by Chromium, with an environment variable to disable the mapping.
+- Operators can set `HATCH_START_URL` so Chromium opens the requested URL when the desktop session starts; the default remains `about:blank`.
 - Default Docker and Docker Compose starts do not show Chromium's unsupported `--no-sandbox` warning.
 - The README presents the HTTPS Guacamole flow as the primary quickstart and keeps Docker Compose as a lower-priority option.
-- An E2E smoke test validates the HTTPS Guacamole login path and confirms the browser desktop starts.
+- An E2E smoke test validates the HTTPS Guacamole login path and confirms the browser desktop starts at the configured `HATCH_START_URL`, using `HATCH_E2E_URL` as the test harness input that is passed through to the container.
