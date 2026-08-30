@@ -45,7 +45,7 @@ Launch a browser desktop directly at a URL:
 hatch 'https://example.com/oauth/authorize?...'
 ```
 
-The CLI checks that Docker is installed and that the Docker daemon responds before any Docker-dependent operation. If Docker is missing, `hatch init` provides installation instructions for macOS, Windows, and Linux. On Linux it detects common distributions from `/etc/os-release`. If Docker is installed but stopped, Hatch prints platform-specific startup instructions.
+The CLI checks that Docker is installed and that the Docker daemon responds before any Docker-dependent operation. If Docker is missing, commands tell the user to run `hatch init`; `hatch init` then provides installation instructions for macOS, Windows, and Linux. On Linux it detects common distributions from `/etc/os-release`. If Docker is installed but stopped, Hatch prints platform-specific startup instructions immediately.
 
 Additional commands:
 
