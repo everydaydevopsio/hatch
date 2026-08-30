@@ -48,7 +48,7 @@ You can run initialization without arguments first to verify Docker prerequisite
 hatch init
 ```
 
-If Docker is ready, Hatch asks you to finish configuration with a hostname:
+If Docker is missing, Hatch prints installation instructions and exits successfully so `init` acts as the setup/help path. If Docker is installed but stopped, it prints startup instructions. If Docker is ready, Hatch asks you to finish configuration with a hostname:
 
 ```bash
 hatch init devbox.tailnet.ts.net
