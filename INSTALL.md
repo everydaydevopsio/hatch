@@ -34,8 +34,11 @@ For OAuth callback mode, run the container with Docker host networking so Chromi
 ```bash
 git clone https://github.com/everydaydevopsio/hatch.git
 cd hatch
-docker build -t hatch:local .
+make setup
+make build
 ```
+
+`make build` builds the local `hatch:local` container image and the Go CLI at `bin/hatch`.
 
 Hatch generates an RDP password at container startup when `RDP_PASSWORD` is not set. Guacamole access is launched with a signed JWT instead of a reusable Guacamole username/password.
 
@@ -246,7 +249,7 @@ Hatch is disposable by default. Browser cookies and sessions disappear when the 
 
 ```bash
 git pull
-docker build --pull -t hatch:local .
+make build
 docker stop hatch
 docker rm hatch
 # Optional: set HATCH_START_URL when Chromium should open a specific page.

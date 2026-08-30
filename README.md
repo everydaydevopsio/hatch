@@ -16,7 +16,62 @@ Browser
 
 The container generates a self-signed HTTPS certificate, a random desktop password, and a Guacamole JWT signing secret at startup unless you provide your own values.
 
-## Quick Start
+## Go CLI
+
+Hatch now includes a Go CLI that manages Hatch containers through the Docker Engine API.
+
+Build it with:
+
+```bash
+make deps
+make build
+```
+
+`make build` builds the local `hatch:local` container image first, then writes the CLI binary to `bin/hatch`.
+For a full local development prerequisite check, including Docker and E2E test tools, run `make setup`.
+
+Check prerequisites and initialize the public hostname with:
+
+```bash
+hatch init
+hatch init devbox.tailnet.ts.net
+```
+
+The hostname is stored in:
+
+```text
+~/.config/hatch/hatch.yaml
+```
+
+The config stores the public hostname and, optionally, an HTTPS port. `hatch init devbox.tailnet.ts.net:8443` is equivalent to `hatch init devbox.tailnet.ts.net 8443`. If the port is omitted, each `hatch open` command uses an available dynamic port.
+
+Launch a browser desktop directly at a URL:
+
+```bash
+hatch open 'https://example.com/oauth/authorize?...'
+```
+
+To force a specific HTTPS port for one session, use:
+
+```bash
+hatch open --port 8443 'https://example.com/oauth/authorize?...'
+```
+
+If the requested port is already in use, Hatch exits with an error instead of selecting a different port.
+
+The CLI checks that Docker is installed and that the Docker daemon responds before any Docker-dependent operation. If Docker is missing, commands tell the user to run `hatch init`; `hatch init` then provides installation instructions for macOS, Windows, and Linux. On Linux it detects common distributions from `/etc/os-release`. If Docker is installed but stopped, Hatch prints platform-specific startup instructions immediately.
+
+Additional commands:
+
+```bash
+hatch list
+hatch stop <session>
+hatch stop --all
+```
+
+See [docs/CLI.md](docs/CLI.md) for details.
+
+## Quick Start Without the CLI
 
 ```bash
 git clone https://github.com/everydaydevopsio/hatch.git
@@ -166,22 +221,29 @@ Required host tools:
 ├── Dockerfile
 ├── docker-compose.yml
 ├── .env.example
+├── cmd/hatch/
+│   ├── main.go
+│   └── main_test.go
 ├── config/
 │   ├── chromium-launch.sh
 │   ├── login-shell.sh
 │   ├── startwm.sh
 │   └── supervisord.conf
+├── docs/
+│   └── CLI.md
 ├── scripts/
 │   ├── e2e-guacamole.sh
 │   ├── entrypoint.sh
 │   ├── guacamole-config.sh
 │   └── healthcheck.sh
-└── .github/workflows/docker.yml
+└── .github/workflows/
+    ├── docker.yml
+    └── go.yml
 ```
 
 ## Supported Host
 
-This project targets Linux hosts running Docker Engine. Docker Desktop behaves differently because host networking is virtualized and is not the intended deployment environment for OAuth callback mode.
+The Hatch container targets Linux Docker Engine hosts for OAuth callback mode. The Go CLI itself provides Docker prerequisite guidance on macOS, Linux, and Windows. Docker Desktop host networking is virtualized differently from a native Linux Docker Engine host, so callback behavior involving host loopback should be verified on desktop operating systems.
 
 ## Security Notes
 
