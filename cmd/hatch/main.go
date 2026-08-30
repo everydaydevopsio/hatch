@@ -26,16 +26,23 @@ import (
 )
 
 const (
-	defaultImage   = "hatch:local"
-	defaultPortMin = 18000
-	defaultPortMax = 18999
-	defaultTTL     = 3600
+	defaultImage     = "hatch:local"
+	defaultPortMin   = 18000
+	defaultPortMax   = 18999
+	defaultTTL       = 3600
+	defaultReadyWait = 90 * time.Second
 )
 
 var accessPathRE = regexp.MustCompile(`Hatch access path:\s+(/hatch/\?token=[^\s]+)`)
 
 type config struct {
 	Hostname string `yaml:"hostname"`
+	Port     int    `yaml:"port,omitempty"`
+}
+
+type openOptions struct {
+	URL  string
+	Port int
 }
 
 type dockerState int
@@ -61,8 +68,8 @@ func run(args []string) error {
 
 	switch args[0] {
 	case "init":
-		if len(args) > 2 {
-			return errors.New("usage: hatch init [hostname]")
+		if len(args) > 3 {
+			return errors.New("usage: hatch init [hostname[:port]|hostname port]")
 		}
 		state, err := checkDocker()
 		if err != nil {
@@ -72,34 +79,40 @@ func run(args []string) error {
 			printDockerGuidance(state)
 			return nil
 		}
-		if len(args) != 2 {
-			return errors.New("Docker is ready; finish setup with: hatch init <hostname>")
+		if len(args) < 2 {
+			return errors.New("Docker is ready; finish setup with: hatch init <hostname[:port]>")
 		}
-		return initConfig(args[1])
+		return initConfig(args[1:])
 	case "list":
 		if err := requireDocker(); err != nil {
 			return err
 		}
 		return listSessions()
-	case "stop":
-		if len(args) != 2 {
-			return errors.New("usage: hatch stop <session>")
+	case "open":
+		opts, err := parseOpenArgs(args[1:])
+		if err != nil {
+			return err
 		}
 		if err := requireDocker(); err != nil {
 			return err
+		}
+		return launch(opts)
+	case "stop":
+		if len(args) != 2 {
+			return errors.New("usage: hatch stop <session>|--all")
+		}
+		if err := requireDocker(); err != nil {
+			return err
+		}
+		if args[1] == "--all" {
+			return stopAllSessions()
 		}
 		return stopSession(args[1])
 	case "help", "-h", "--help":
 		printUsage()
 		return nil
 	default:
-		if len(args) != 1 {
-			return errors.New("usage: hatch <url>")
-		}
-		if err := requireDocker(); err != nil {
-			return err
-		}
-		return launch(args[0])
+		return fmt.Errorf("unknown command %q; run 'hatch help'", args[0])
 	}
 }
 
@@ -107,16 +120,19 @@ func printUsage() {
 	fmt.Println(`Hatch launches an ephemeral browser desktop for an OAuth URL.
 
 Usage:
-  hatch init [hostname]
-  hatch <url>
+  hatch init [hostname[:port]|hostname port]
+  hatch open [--port port] <url>
   hatch list
-  hatch stop <session>
+  hatch stop <session>|--all
 
 Examples:
   hatch init
-  hatch init devbox.tailnet.ts.net
-  hatch 'https://example.com/oauth/authorize?...'
+  hatch init devbox.tailnet.ts.net 8443
+  hatch init devbox.tailnet.ts.net:8443
+  hatch open --port 8443 'https://example.com/oauth/authorize?...'
+  hatch open 'https://example.com/oauth/authorize?...'
   hatch list
+  hatch stop --all
   hatch stop 8ac4d911`)
 }
 
@@ -128,8 +144,8 @@ func configPath() (string, error) {
 	return filepath.Join(home, ".config", "hatch", "hatch.yaml"), nil
 }
 
-func initConfig(rawHostname string) error {
-	hostname, err := normalizeHostname(rawHostname)
+func initConfig(args []string) error {
+	endpoint, err := normalizeEndpoint(args)
 	if err != nil {
 		return err
 	}
@@ -142,7 +158,7 @@ func initConfig(rawHostname string) error {
 		return fmt.Errorf("create config directory: %w", err)
 	}
 
-	data, err := yaml.Marshal(config{Hostname: hostname})
+	data, err := yaml.Marshal(endpoint)
 	if err != nil {
 		return fmt.Errorf("encode config: %w", err)
 	}
@@ -152,34 +168,147 @@ func initConfig(rawHostname string) error {
 
 	fmt.Printf("Docker is installed and running.\n")
 	fmt.Printf("Wrote %s\n", path)
-	fmt.Printf("Hostname: %s\n", hostname)
+	fmt.Printf("Hostname: %s\n", endpoint.Hostname)
+	if endpoint.Port != 0 {
+		fmt.Printf("Port: %d\n", endpoint.Port)
+	} else {
+		fmt.Printf("Port: dynamic\n")
+	}
 	return nil
 }
 
 func normalizeHostname(input string) (string, error) {
+	endpoint, err := normalizeEndpoint([]string{input})
+	if err != nil {
+		return "", err
+	}
+	return endpoint.Hostname, nil
+}
+
+func normalizeEndpoint(args []string) (config, error) {
+	if len(args) == 0 || len(args) > 2 {
+		return config{}, errors.New("usage: hatch init [hostname[:port]|hostname port]")
+	}
+
+	rawHost := args[0]
+	rawPort := ""
+	if len(args) == 2 {
+		rawPort = args[1]
+	}
+
+	hostname, port, err := parseEndpoint(rawHost, rawPort)
+	if err != nil {
+		return config{}, err
+	}
+	return config{Hostname: hostname, Port: port}, nil
+}
+
+func parseEndpoint(input, rawPort string) (string, int, error) {
 	input = strings.TrimSpace(input)
 	if input == "" {
-		return "", errors.New("hostname cannot be empty")
+		return "", 0, errors.New("hostname cannot be empty")
 	}
+	rawPort = strings.TrimSpace(rawPort)
+	port := 0
 
 	if strings.Contains(input, "://") {
 		u, err := url.Parse(input)
 		if err != nil || u.Hostname() == "" {
-			return "", fmt.Errorf("invalid hostname %q", input)
+			return "", 0, fmt.Errorf("invalid hostname %q", input)
+		}
+		if u.Port() != "" {
+			if rawPort != "" {
+				return "", 0, errors.New("provide port either in the hostname or as a separate argument, not both")
+			}
+			rawPort = u.Port()
 		}
 		input = u.Hostname()
 	}
 
 	if strings.ContainsAny(input, "/?#") {
-		return "", fmt.Errorf("hostname must not include a path, query, or fragment: %q", input)
+		return "", 0, fmt.Errorf("hostname must not include a path, query, or fragment: %q", input)
 	}
-	if host, _, err := net.SplitHostPort(input); err == nil {
+	if host, splitPort, err := net.SplitHostPort(input); err == nil {
+		if rawPort != "" {
+			return "", 0, errors.New("provide port either in the hostname or as a separate argument, not both")
+		}
 		input = host
+		rawPort = splitPort
+	} else if strings.Count(input, ":") == 1 {
+		if rawPort != "" {
+			return "", 0, errors.New("provide port either in the hostname or as a separate argument, not both")
+		}
+		host, splitPort, _ := strings.Cut(input, ":")
+		input = host
+		rawPort = splitPort
+	} else if strings.Contains(input, ":") {
+		return "", 0, fmt.Errorf("invalid hostname or host:port %q", input)
 	}
 	if input == "" {
-		return "", errors.New("hostname cannot be empty")
+		return "", 0, errors.New("hostname cannot be empty")
 	}
-	return input, nil
+	if rawPort != "" {
+		parsed, err := strconv.Atoi(rawPort)
+		if err != nil || parsed < 1 || parsed > 65535 {
+			return "", 0, fmt.Errorf("invalid port %q", rawPort)
+		}
+		port = parsed
+	}
+	return input, port, nil
+}
+
+func parseOpenArgs(args []string) (openOptions, error) {
+	if len(args) == 0 {
+		return openOptions{}, errors.New("usage: hatch open [--port port] <url>")
+	}
+
+	var opts openOptions
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--port":
+			if opts.Port != 0 {
+				return openOptions{}, errors.New("port specified more than once")
+			}
+			if i+1 >= len(args) {
+				return openOptions{}, errors.New("usage: hatch open [--port port] <url>")
+			}
+			port, err := parsePort(args[i+1])
+			if err != nil {
+				return openOptions{}, err
+			}
+			opts.Port = port
+			i++
+		case strings.HasPrefix(arg, "--port="):
+			if opts.Port != 0 {
+				return openOptions{}, errors.New("port specified more than once")
+			}
+			port, err := parsePort(strings.TrimPrefix(arg, "--port="))
+			if err != nil {
+				return openOptions{}, err
+			}
+			opts.Port = port
+		case strings.HasPrefix(arg, "-"):
+			return openOptions{}, fmt.Errorf("unknown option %q", arg)
+		default:
+			if opts.URL != "" {
+				return openOptions{}, errors.New("usage: hatch open [--port port] <url>")
+			}
+			opts.URL = arg
+		}
+	}
+	if opts.URL == "" {
+		return openOptions{}, errors.New("usage: hatch open [--port port] <url>")
+	}
+	return opts, nil
+}
+
+func parsePort(raw string) (int, error) {
+	parsed, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || parsed < 1 || parsed > 65535 {
+		return 0, fmt.Errorf("invalid port %q", raw)
+	}
+	return parsed, nil
 }
 
 func loadConfig() (config, error) {
@@ -190,7 +319,7 @@ func loadConfig() (config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return config{}, fmt.Errorf("configuration not found; run hatch init <hostname> first")
+			return config{}, fmt.Errorf("configuration not found; run hatch init <hostname[:port]> first")
 		}
 		return config{}, fmt.Errorf("read config: %w", err)
 	}
@@ -200,7 +329,10 @@ func loadConfig() (config, error) {
 		return config{}, fmt.Errorf("parse config: %w", err)
 	}
 	if cfg.Hostname == "" {
-		return config{}, errors.New("configuration has no hostname; rerun hatch init <hostname>")
+		return config{}, errors.New("configuration has no hostname; rerun hatch init <hostname[:port]>")
+	}
+	if cfg.Port != 0 && (cfg.Port < 1 || cfg.Port > 65535) {
+		return config{}, fmt.Errorf("configuration has invalid port %d; rerun hatch init <hostname[:port]>", cfg.Port)
 	}
 	return cfg, nil
 }
@@ -222,11 +354,11 @@ func checkDocker() (dockerState, error) {
 	defer cancel()
 	cli, err := dockerClient()
 	if err != nil {
-		return dockerStopped, nil
+		return dockerStopped, err
 	}
 	defer cli.Close()
 	if _, err := cli.Ping(ctx, mobyclient.PingOptions{NegotiateAPIVersion: true}); err != nil {
-		return dockerStopped, nil
+		return dockerStopped, err
 	}
 	return dockerReady, nil
 }
@@ -241,6 +373,9 @@ func requireDocker() error {
 		return errors.New("Docker is not installed; run 'hatch init' for installation instructions")
 	case dockerStopped:
 		printDockerGuidance(dockerStopped)
+		if err != nil {
+			return fmt.Errorf("Docker is installed but not reachable: %w", err)
+		}
 		return errors.New("Docker is installed but not running")
 	default:
 		return nil
@@ -252,7 +387,7 @@ func printDockerGuidance(state dockerState) {
 	if state == dockerMissing {
 		fmt.Printf("Docker is not installed.\n\n")
 		fmt.Print(dockerInstallInstructions(osName, linuxDistribution()))
-		fmt.Printf("\nAfter Docker is installed and running, run:\n  hatch init <hostname>\n")
+		fmt.Printf("\nAfter Docker is installed and running, run:\n  hatch init <hostname[:port]>\n")
 		return
 	}
 
@@ -407,12 +542,16 @@ func linuxDistribution() string {
 	return id
 }
 
-func launch(rawURL string) error {
-	startURL, err := validateStartURL(rawURL)
+func launch(opts openOptions) error {
+	startURL, err := validateStartURL(opts.URL)
 	if err != nil {
 		return err
 	}
 	cfg, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	port, err := selectLaunchPort(cfg, opts.Port)
 	if err != nil {
 		return err
 	}
@@ -424,10 +563,6 @@ func launch(rawURL string) error {
 	}
 	defer cli.Close()
 
-	port, err := findFreePort(defaultPortMin, defaultPortMax)
-	if err != nil {
-		return err
-	}
 	sessionID, err := newSessionID()
 	if err != nil {
 		return err
@@ -441,24 +576,7 @@ func launch(rawURL string) error {
 		"io.everydaydevops.hatch.port":      strconv.Itoa(port),
 	}
 
-	created, err := cli.ContainerCreate(ctx, mobyclient.ContainerCreateOptions{
-		Name:  name,
-		Image: defaultImage,
-		Config: &containertypes.Config{
-			Image: defaultImage,
-			Env: []string{
-				"HATCH_START_URL=" + startURL,
-				"HATCH_HTTPS_PORT=" + strconv.Itoa(port),
-				"HATCH_GUAC_LAUNCH_TTL_SECONDS=" + strconv.Itoa(defaultTTL),
-			},
-			Labels: labels,
-		},
-		HostConfig: &containertypes.HostConfig{
-			NetworkMode: "host",
-			ShmSize:     1 << 30,
-			SecurityOpt: []string{"no-new-privileges:true"},
-		},
-	})
+	created, err := cli.ContainerCreate(ctx, launchContainerOptions(name, startURL, port, labels))
 	if err != nil {
 		return fmt.Errorf("create container from %s: %w", defaultImage, err)
 	}
@@ -474,6 +592,10 @@ func launch(rawURL string) error {
 		return fmt.Errorf("start container: %w", err)
 	}
 
+	if err := waitForHealthyContainer(ctx, cli, created.ID, defaultReadyWait); err != nil {
+		return err
+	}
+
 	accessPath, err := waitForAccessPath(ctx, cli, created.ID, 20*time.Second)
 	if err != nil {
 		return err
@@ -486,6 +608,45 @@ func launch(rawURL string) error {
 	fmt.Printf("Browser URL:  https://%s:%d%s\n", cfg.Hostname, port, accessPath)
 	fmt.Printf("Stop with:    hatch stop %s\n", sessionID)
 	return nil
+}
+
+func selectLaunchPort(cfg config, requestedPort int) (int, error) {
+	if requestedPort != 0 {
+		return requireFreePort(requestedPort)
+	}
+	if cfg.Port != 0 {
+		return requireFreePort(cfg.Port)
+	}
+	return findFreePort(defaultPortMin, defaultPortMax)
+}
+
+func requireFreePort(port int) (int, error) {
+	ln, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", port))
+	if err != nil {
+		return 0, fmt.Errorf("port %d is already in use", port)
+	}
+	_ = ln.Close()
+	return port, nil
+}
+
+func launchContainerOptions(name, startURL string, port int, labels map[string]string) mobyclient.ContainerCreateOptions {
+	return mobyclient.ContainerCreateOptions{
+		Name: name,
+		Config: &containertypes.Config{
+			Image: defaultImage,
+			Env: []string{
+				"HATCH_START_URL=" + startURL,
+				"HATCH_HTTPS_PORT=" + strconv.Itoa(port),
+				"HATCH_GUAC_LAUNCH_TTL_SECONDS=" + strconv.Itoa(defaultTTL),
+			},
+			Labels: labels,
+		},
+		HostConfig: &containertypes.HostConfig{
+			NetworkMode: "host",
+			ShmSize:     1 << 30,
+			SecurityOpt: []string{"no-new-privileges:true"},
+		},
+	}
 }
 
 func validateStartURL(raw string) (string, error) {
@@ -520,6 +681,50 @@ func newSessionID() (string, error) {
 		return "", fmt.Errorf("generate session ID: %w", err)
 	}
 	return hex.EncodeToString(buf), nil
+}
+
+func waitForHealthyContainer(ctx context.Context, cli *mobyclient.Client, containerID string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		inspect, err := cli.ContainerInspect(ctx, containerID, mobyclient.ContainerInspectOptions{})
+		if err != nil {
+			return fmt.Errorf("inspect container health: %w", err)
+		}
+		status, err := inspectHealthStatus(inspect.Container)
+		if err != nil {
+			return err
+		}
+		if status == containertypes.Healthy {
+			return nil
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return errors.New("timed out waiting for Hatch container to become healthy")
+}
+
+func inspectHealthStatus(container containertypes.InspectResponse) (containertypes.HealthStatus, error) {
+	if container.State == nil {
+		return "", errors.New("container has no state")
+	}
+	if container.State.Dead || (!container.State.Running && !container.State.Restarting) {
+		if container.State.Error != "" {
+			return "", fmt.Errorf("container is %s: %s", container.State.Status, container.State.Error)
+		}
+		return "", fmt.Errorf("container is %s", container.State.Status)
+	}
+	if container.State.Health == nil {
+		return "", errors.New("container has no healthcheck")
+	}
+	switch container.State.Health.Status {
+	case containertypes.Healthy:
+		return containertypes.Healthy, nil
+	case containertypes.Unhealthy:
+		return containertypes.Unhealthy, errors.New("container became unhealthy")
+	case containertypes.Starting:
+		return containertypes.Starting, nil
+	default:
+		return container.State.Health.Status, fmt.Errorf("unexpected container health status %q", container.State.Health.Status)
+	}
 }
 
 func waitForAccessPath(ctx context.Context, cli *mobyclient.Client, containerID string, timeout time.Duration) (string, error) {
@@ -563,11 +768,9 @@ func listSessions() error {
 		port    string
 		url     string
 	}
+	containers := hatchContainers(result.Items)
 	var rows []row
-	for _, ctr := range result.Items {
-		if ctr.Labels["io.everydaydevops.hatch.managed"] != "true" {
-			continue
-		}
+	for _, ctr := range containers {
 		rows = append(rows, row{
 			session: ctr.Labels["io.everydaydevops.hatch.session"],
 			status:  ctr.Status,
@@ -602,10 +805,7 @@ func stopSession(session string) error {
 	}
 
 	var matches []containertypes.Summary
-	for _, ctr := range result.Items {
-		if ctr.Labels["io.everydaydevops.hatch.managed"] != "true" {
-			continue
-		}
+	for _, ctr := range hatchContainers(result.Items) {
 		id := ctr.Labels["io.everydaydevops.hatch.session"]
 		if id == session || strings.HasPrefix(id, session) {
 			matches = append(matches, ctr)
@@ -623,6 +823,46 @@ func stopSession(session string) error {
 	}
 	fmt.Printf("Stopped %s\n", matches[0].Labels["io.everydaydevops.hatch.session"])
 	return nil
+}
+
+func stopAllSessions() error {
+	ctx := context.Background()
+	cli, err := dockerClient()
+	if err != nil {
+		return err
+	}
+	defer cli.Close()
+
+	result, err := cli.ContainerList(ctx, mobyclient.ContainerListOptions{All: true})
+	if err != nil {
+		return fmt.Errorf("list containers: %w", err)
+	}
+
+	containers := hatchContainers(result.Items)
+	if len(containers) == 0 {
+		fmt.Println("No Hatch sessions.")
+		return nil
+	}
+	sort.Slice(containers, func(i, j int) bool {
+		return containers[i].Labels["io.everydaydevops.hatch.session"] < containers[j].Labels["io.everydaydevops.hatch.session"]
+	})
+	for _, ctr := range containers {
+		if _, err := cli.ContainerRemove(ctx, ctr.ID, mobyclient.ContainerRemoveOptions{Force: true}); err != nil {
+			return fmt.Errorf("remove session %s: %w", ctr.Labels["io.everydaydevops.hatch.session"], err)
+		}
+		fmt.Printf("Stopped %s\n", ctr.Labels["io.everydaydevops.hatch.session"])
+	}
+	return nil
+}
+
+func hatchContainers(containers []containertypes.Summary) []containertypes.Summary {
+	var managed []containertypes.Summary
+	for _, ctr := range containers {
+		if ctr.Labels["io.everydaydevops.hatch.managed"] == "true" {
+			managed = append(managed, ctr)
+		}
+	}
+	return managed
 }
 
 func truncate(s string, max int) string {

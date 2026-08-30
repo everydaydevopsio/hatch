@@ -23,8 +23,12 @@ Hatch now includes a Go CLI that manages Hatch containers through the Docker Eng
 Build it with:
 
 ```bash
-go build -o hatch ./cmd/hatch
+make deps
+make build
 ```
+
+`make build` builds the local `hatch:local` container image first, then writes the CLI binary to `bin/hatch`.
+For a full local development prerequisite check, including Docker and E2E test tools, run `make setup`.
 
 Check prerequisites and initialize the public hostname with:
 
@@ -39,11 +43,21 @@ The hostname is stored in:
 ~/.config/hatch/hatch.yaml
 ```
 
+The config stores the public hostname and, optionally, an HTTPS port. `hatch init devbox.tailnet.ts.net:8443` is equivalent to `hatch init devbox.tailnet.ts.net 8443`. If the port is omitted, each `hatch open` command uses an available dynamic port.
+
 Launch a browser desktop directly at a URL:
 
 ```bash
-hatch 'https://example.com/oauth/authorize?...'
+hatch open 'https://example.com/oauth/authorize?...'
 ```
+
+To force a specific HTTPS port for one session, use:
+
+```bash
+hatch open --port 8443 'https://example.com/oauth/authorize?...'
+```
+
+If the requested port is already in use, Hatch exits with an error instead of selecting a different port.
 
 The CLI checks that Docker is installed and that the Docker daemon responds before any Docker-dependent operation. If Docker is missing, commands tell the user to run `hatch init`; `hatch init` then provides installation instructions for macOS, Windows, and Linux. On Linux it detects common distributions from `/etc/os-release`. If Docker is installed but stopped, Hatch prints platform-specific startup instructions immediately.
 
@@ -52,6 +66,7 @@ Additional commands:
 ```bash
 hatch list
 hatch stop <session>
+hatch stop --all
 ```
 
 See [docs/CLI.md](docs/CLI.md) for details.

@@ -5,9 +5,13 @@ The `hatch` CLI manages Hatch browser-desktop sessions through the Docker Engine
 ## Build
 
 ```bash
-go build -o hatch ./cmd/hatch
-sudo install -m 0755 hatch /usr/local/bin/hatch
+make deps
+make build
+sudo install -m 0755 bin/hatch /usr/local/bin/hatch
 ```
+
+`make build` builds the local `hatch:local` container image before compiling the CLI, matching the image the CLI runs by default.
+Run `make setup` to verify Go, Docker, and the tools used by the E2E smoke test are available locally.
 
 Build the Hatch container image once on the server:
 
@@ -24,7 +28,7 @@ Before any Docker-dependent command, Hatch checks two things:
 1. whether the `docker` command is installed;
 2. whether the Docker Engine API responds to a Docker SDK ping.
 
-If Docker is not installed, commands such as `hatch <url>`, `hatch list`, and `hatch stop` tell the user to run:
+If Docker is not installed, commands such as `hatch open <url>`, `hatch list`, and `hatch stop` tell the user to run:
 
 ```bash
 hatch init
@@ -48,10 +52,12 @@ You can run initialization without arguments first to verify Docker prerequisite
 hatch init
 ```
 
-If Docker is missing, Hatch prints installation instructions and exits successfully so `init` acts as the setup/help path. If Docker is installed but stopped, it prints startup instructions. If Docker is ready, Hatch asks you to finish configuration with a hostname:
+If Docker is missing, Hatch prints installation instructions and exits successfully so `init` acts as the setup/help path. If Docker is installed but stopped, it prints startup instructions. If Docker is ready, Hatch asks you to finish configuration with a hostname and optional default HTTPS port:
 
 ```bash
 hatch init devbox.tailnet.ts.net
+hatch init devbox.tailnet.ts.net 8443
+hatch init devbox.tailnet.ts.net:8443
 ```
 
 This writes:
@@ -68,7 +74,14 @@ hostname: devbox.tailnet.ts.net
 
 The config directory is created with mode `0700`; the config file is written with mode `0600`.
 
-You can also provide a URL. Hatch stores only its hostname:
+If the port is omitted, Hatch leaves it out of the config and `hatch open` chooses an available dynamic port for each session. If a port is provided, Hatch stores it:
+
+```yaml
+hostname: devbox.tailnet.ts.net
+port: 8443
+```
+
+You can also provide a URL. Hatch stores its hostname and port when one is present:
 
 ```bash
 hatch init https://devbox.tailnet.ts.net:8443/
@@ -77,21 +90,23 @@ hatch init https://devbox.tailnet.ts.net:8443/
 ## Launch a browser session
 
 ```bash
-hatch 'https://example.com/oauth/authorize?...'
+hatch open 'https://example.com/oauth/authorize?...'
+hatch open --port 8443 'https://example.com/oauth/authorize?...'
 ```
 
 Hatch will:
 
 1. verify that Docker is installed and running;
 2. validate that the start URL uses HTTP or HTTPS;
-3. allocate an available TCP port from `18000-18999`;
+3. use `--port`, the configured port, or an available dynamic port from `18000-18999`;
 4. generate a short session ID;
 5. create a Docker container named `hatch-<session>`;
 6. run the container with host networking so Chromium can reach OAuth callback listeners on server loopback;
 7. set `HATCH_START_URL` to the supplied URL;
-8. set the Hatch HTTPS listener to the allocated port;
-9. wait for the container to emit its signed Guacamole launch path;
-10. print a browser URL built from the configured hostname, allocated port, and Guacamole JWT path.
+8. set the Hatch HTTPS listener to the selected port;
+9. wait for the container to report healthy;
+10. wait for the container to emit its signed Guacamole launch path;
+11. print a browser URL built from the configured hostname, selected port, and Guacamole JWT path.
 
 Example output:
 
@@ -121,11 +136,19 @@ hatch stop 8ac4d911
 
 A unique session prefix is also accepted. Hatch force-removes the matching ephemeral container.
 
+Stop all Hatch-managed sessions with:
+
+```bash
+hatch stop --all
+```
+
+Only containers labeled as Hatch-managed sessions are removed.
+
 ## Current defaults
 
 ```text
 Docker image: hatch:local
-HTTPS port range: 18000-18999
+HTTPS port: `--port`, configured by `hatch init`, or dynamic range `18000-18999`
 Guacamole launch token TTL: 3600 seconds
 Network mode: host
 Shared memory: 1 GiB
