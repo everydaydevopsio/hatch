@@ -2,12 +2,12 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/url"
 	"os"
@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/moby/moby/api/pkg/stdcopy"
 	containertypes "github.com/moby/moby/api/types/container"
 	mobyclient "github.com/moby/moby/client"
 	"gopkg.in/yaml.v3"
@@ -72,12 +73,12 @@ func run(args []string) error {
 			return errors.New("usage: hatch init [hostname[:port]|hostname port]")
 		}
 		state, err := checkDocker()
-		if err != nil {
-			return err
-		}
 		if state != dockerReady {
 			printDockerGuidance(state)
 			return nil
+		}
+		if err != nil {
+			return err
 		}
 		if len(args) < 2 {
 			return errors.New("Docker is ready; finish setup with: hatch init <hostname[:port]>")
@@ -338,7 +339,11 @@ func loadConfig() (config, error) {
 }
 
 func dockerClient() (*mobyclient.Client, error) {
-	cli, err := mobyclient.New(mobyclient.FromEnv, mobyclient.WithUserAgent("hatch-cli"))
+	cli, err := mobyclient.New(
+		mobyclient.FromEnv,
+		mobyclient.WithAPIVersionNegotiation(),
+		mobyclient.WithUserAgent("hatch-cli"),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("create Docker client: %w", err)
 	}
@@ -365,9 +370,6 @@ func checkDocker() (dockerState, error) {
 
 func requireDocker() error {
 	state, err := checkDocker()
-	if err != nil {
-		return err
-	}
 	switch state {
 	case dockerMissing:
 		return errors.New("Docker is not installed; run 'hatch init' for installation instructions")
@@ -377,8 +379,13 @@ func requireDocker() error {
 			return fmt.Errorf("Docker is installed but not reachable: %w", err)
 		}
 		return errors.New("Docker is installed but not running")
-	default:
+	case dockerReady:
+		if err != nil {
+			return err
+		}
 		return nil
+	default:
+		return fmt.Errorf("unknown Docker state %d", state)
 	}
 }
 
@@ -572,7 +579,7 @@ func launch(opts openOptions) error {
 	labels := map[string]string{
 		"io.everydaydevops.hatch.managed":   "true",
 		"io.everydaydevops.hatch.session":   sessionID,
-		"io.everydaydevops.hatch.start-url": startURL,
+		"io.everydaydevops.hatch.start-url": redactedStartURL(startURL),
 		"io.everydaydevops.hatch.port":      strconv.Itoa(port),
 	}
 
@@ -663,6 +670,16 @@ func validateStartURL(raw string) (string, error) {
 	return raw, nil
 }
 
+func redactedStartURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "<redacted>"
+	}
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String()
+}
+
 func findFreePort(min, max int) (int, error) {
 	for port := min; port <= max; port++ {
 		ln, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", port))
@@ -736,9 +753,11 @@ func waitForAccessPath(ctx context.Context, cli *mobyclient.Client, containerID 
 			Tail:       "200",
 		})
 		if err == nil {
-			data, readErr := io.ReadAll(logs)
+			var stdout, stderr bytes.Buffer
+			_, readErr := stdcopy.StdCopy(&stdout, &stderr, logs)
 			_ = logs.Close()
 			if readErr == nil {
+				data := append(stdout.Bytes(), stderr.Bytes()...)
 				if match := accessPathRE.FindSubmatch(data); len(match) == 2 {
 					return string(match[1]), nil
 				}

@@ -84,6 +84,14 @@ func TestValidateStartURL(t *testing.T) {
 	}
 }
 
+func TestRedactedStartURLRemovesSensitiveParts(t *testing.T) {
+	got := redactedStartURL("https://example.com/oauth/authorize?client_id=abc&state=secret#token")
+	want := "https://example.com/oauth/authorize"
+	if got != want {
+		t.Fatalf("redactedStartURL() = %q, want %q", got, want)
+	}
+}
+
 func TestRunRequiresOpenCommandForURL(t *testing.T) {
 	if err := run([]string{"https://example.com/oauth?client_id=abc"}); err == nil {
 		t.Fatalf("implicit URL command accepted")
