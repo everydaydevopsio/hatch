@@ -17,9 +17,38 @@ docker build -t hatch:local .
 
 The initial CLI intentionally uses `hatch:local` so the container image and CLI can evolve together without introducing registry authentication into the first implementation.
 
+## Docker preflight
+
+Before any Docker-dependent command, Hatch checks two things:
+
+1. whether the `docker` command is installed;
+2. whether the Docker Engine API responds to a Docker SDK ping.
+
+If Docker is not installed, commands such as `hatch <url>`, `hatch list`, and `hatch stop` tell the user to run:
+
+```bash
+hatch init
+```
+
+`hatch init` detects the operating system and prints installation instructions for macOS, Windows, or Linux. On Linux, Hatch reads `/etc/os-release` and provides more specific guidance for Ubuntu, Debian, Fedora, CentOS, and RHEL when possible.
+
+If Docker is installed but the daemon is not running, Hatch prints platform-specific startup instructions immediately:
+
+- macOS: start Docker Desktop with `open -a Docker` or from Applications;
+- Windows: launch Docker Desktop from the Start menu or PowerShell;
+- Linux: run `sudo systemctl start docker`, with an option to enable it at boot.
+
+Hatch does not attempt to install Docker or start privileged services automatically. It explains the required action and leaves control with the operator.
+
 ## Initialize
 
-Configure the hostname that users will use to reach the server:
+You can run initialization without arguments first to verify Docker prerequisites:
+
+```bash
+hatch init
+```
+
+If Docker is ready, Hatch asks you to finish configuration with a hostname:
 
 ```bash
 hatch init devbox.tailnet.ts.net
@@ -53,15 +82,16 @@ hatch 'https://example.com/oauth/authorize?...'
 
 Hatch will:
 
-1. validate that the start URL uses HTTP or HTTPS;
-2. allocate an available TCP port from `18000-18999`;
-3. generate a short session ID;
-4. create a Docker container named `hatch-<session>`;
-5. run the container with host networking so Chromium can reach OAuth callback listeners on server loopback;
-6. set `HATCH_START_URL` to the supplied URL;
-7. set the Hatch HTTPS listener to the allocated port;
-8. wait for the container to emit its signed Guacamole launch path;
-9. print a browser URL built from the configured hostname, allocated port, and Guacamole JWT path.
+1. verify that Docker is installed and running;
+2. validate that the start URL uses HTTP or HTTPS;
+3. allocate an available TCP port from `18000-18999`;
+4. generate a short session ID;
+5. create a Docker container named `hatch-<session>`;
+6. run the container with host networking so Chromium can reach OAuth callback listeners on server loopback;
+7. set `HATCH_START_URL` to the supplied URL;
+8. set the Hatch HTTPS listener to the allocated port;
+9. wait for the container to emit its signed Guacamole launch path;
+10. print a browser URL built from the configured hostname, allocated port, and Guacamole JWT path.
 
 Example output:
 
