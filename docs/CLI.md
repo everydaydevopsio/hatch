@@ -155,7 +155,7 @@ Shared memory: 1 GiB
 no-new-privileges: enabled
 ```
 
-These are code defaults for the first version. Only the public hostname is persisted in the YAML configuration.
+These are code defaults for the first version. The public hostname and optional default HTTPS port are persisted in the YAML configuration; session IDs, image selection, token lifetime, network mode, and other runtime settings are not.
 
 ## Docker SDK
 
