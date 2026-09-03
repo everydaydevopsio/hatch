@@ -1,137 +1,141 @@
-# Hatch
+<p align="center">
+  <img src=".github/assets/icon.svg" alt="Hatch project icon" width="128">
+</p>
 
-A small Dockerized browser desktop for completing interactive OAuth flows on a headless Linux server.
+<h1 align="center">Hatch</h1>
 
-Hatch runs Chromium behind Apache Guacamole and serves the desktop over HTTPS from the container. The internal path is:
+<p align="center">
+  <strong>A disposable browser desktop for completing localhost OAuth flows on a headless Linux server.</strong>
+</p>
 
-```text
-Browser
-  -> HTTPS on container port 443
-  -> nginx
-  -> Guacamole on 127.0.0.1:8080
-  -> guacd on 127.0.0.1:4822
-  -> xrdp on 127.0.0.1:3389
-  -> Openbox + Chromium
-```
+<p align="center">
+  <a href="https://github.com/everydaydevopsio/hatch/actions/workflows/go.yml"><img src="https://github.com/everydaydevopsio/hatch/actions/workflows/go.yml/badge.svg" alt="Go tests"></a>
+  <a href="https://github.com/everydaydevopsio/hatch/actions/workflows/docker.yml"><img src="https://github.com/everydaydevopsio/hatch/actions/workflows/docker.yml/badge.svg" alt="Container build"></a>
+  <a href="https://github.com/everydaydevopsio/hatch/pkgs/container/hatch"><img src="https://img.shields.io/badge/container-ghcr.io-2496ED" alt="GHCR container"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/everydaydevopsio/hatch" alt="License"></a>
+</p>
 
-The container generates a self-signed HTTPS certificate, a random desktop password, and a Guacamole JWT signing secret at startup unless you provide your own values.
+Hatch gives a headless Linux server a small Chromium desktop that you open through HTTPS. It is designed for interactive OAuth flows where a CLI, MCP server, or agent starts a callback listener on server loopback, such as `http://127.0.0.1:8765/callback`.
 
-## Go CLI
+The Go CLI creates an ephemeral Docker session, opens Chromium at the authorization URL, and prints a signed browser-access URL. Complete the provider login from your laptop, tablet, or phone. Chromium follows the final localhost redirect back to the waiting process on the server.
 
-Hatch now includes a Go CLI that manages Hatch containers through the Docker Engine API.
+## The problem Hatch solves
 
-Build it with:
+A command running on a remote server often prints an OAuth authorization URL and waits for a callback on `127.0.0.1`. Opening that URL in your local browser sends the callback to your laptop instead of the remote process.
 
-```bash
-make deps
-make build
-```
-
-`make build` builds the local `hatch:local` container image first, then writes the CLI binary to `bin/hatch`.
-For a full local development prerequisite check, including Docker and E2E test tools, run `make setup`.
-
-Check prerequisites and initialize the public hostname with:
-
-```bash
-hatch init
-hatch init devbox.tailnet.ts.net
-```
-
-The hostname is stored in:
+Hatch places the interactive browser on the server while making its desktop available through a normal web browser:
 
 ```text
-~/.config/hatch/hatch.yaml
+Your browser
+    |
+    | HTTPS
+    v
+nginx
+    |
+    v
+Apache Guacamole -> guacd -> xrdp -> Openbox -> Chromium
+                                           |
+                                           | localhost OAuth callback
+                                           v
+                               CLI, MCP server, or agent
 ```
 
-The config stores the public hostname and, optionally, an HTTPS port. `hatch init devbox.tailnet.ts.net:8443` is equivalent to `hatch init devbox.tailnet.ts.net 8443`. If the port is omitted, each `hatch open` command uses an available dynamic port.
+The Hatch CLI runs its container with host networking. Chromium therefore shares the Linux host's loopback view and can reach the callback listener.
 
-Launch a browser desktop directly at a URL:
+## Quick start
 
-```bash
-hatch open 'https://example.com/oauth/authorize?...'
-```
+The current CLI builds and launches the local `hatch:local` image.
 
-To force a specific HTTPS port for one session, use:
+Requirements:
 
-```bash
-hatch open --port 8443 'https://example.com/oauth/authorize?...'
-```
+- A Linux host with Docker Engine.
+- Go 1.24 or newer to build the CLI.
+- A private hostname or IP reachable from your browser. Tailscale or another VPN is recommended.
+- About 1 GB of free memory while Chromium runs.
 
-If the requested port is already in use, Hatch exits with an error instead of selecting a different port.
-
-The CLI checks that Docker is installed and that the Docker daemon responds before any Docker-dependent operation. If Docker is missing, commands tell the user to run `hatch init`; `hatch init` then provides installation instructions for macOS, Windows, and Linux. On Linux it detects common distributions from `/etc/os-release`. If Docker is installed but stopped, Hatch prints platform-specific startup instructions immediately.
-
-Additional commands:
-
-```bash
-hatch list
-hatch stop <session>
-hatch stop --all
-```
-
-See [docs/CLI.md](docs/CLI.md) for details.
-
-## Quick Start Without the CLI
+Build and install:
 
 ```bash
 git clone https://github.com/everydaydevopsio/hatch.git
 cd hatch
 
+make setup
+make build
+sudo install -m 0755 bin/hatch /usr/local/bin/hatch
+```
+
+Initialize Hatch with the hostname used to reach the server:
+
+```bash
+hatch init devbox.tailnet.ts.net
+```
+
+Add a fixed HTTPS port when required:
+
+```bash
+hatch init devbox.tailnet.ts.net:8443
+```
+
+Launch a browser desktop directly at an OAuth authorization URL:
+
+```bash
+hatch open 'https://example.com/oauth/authorize?...'
+```
+
+Hatch prints output similar to:
+
+```text
+Session:      8ac4d911
+Container:    hatch-8ac4d911
+Start URL:    https://example.com/oauth/authorize?...
+Browser URL:  https://devbox.tailnet.ts.net:18000/hatch/?token=eyJ...
+Stop with:    hatch stop 8ac4d911
+```
+
+Open the `Browser URL`, accept the self-signed certificate warning when applicable, and complete authentication.
+
+## CLI commands
+
+| Command | Purpose |
+| --- | --- |
+| `hatch init [hostname[:port]\|hostname port]` | Check Docker and save the public hostname with an optional default port |
+| `hatch open [--port port] <url>` | Start an ephemeral browser-desktop session |
+| `hatch list` | List Hatch-managed containers |
+| `hatch stop <session>` | Stop one session by ID or unique prefix |
+| `hatch stop --all` | Stop every Hatch-managed session |
+| `hatch help` | Show command help |
+
+Port selection follows this order:
+
+1. `--port` supplied to `hatch open`.
+2. The port saved by `hatch init`.
+3. An available port from `18000-18999`.
+
+The CLI stores configuration at `~/.config/hatch/hatch.yaml`, with directory mode `0700` and file mode `0600`.
+
+## Session behavior
+
+Each CLI-managed session:
+
+- uses the `hatch:local` image;
+- runs with Docker host networking;
+- gets a short session ID and Docker labels;
+- receives 1 GiB of shared memory;
+- enables `no-new-privileges`;
+- uses a one-hour Guacamole launch-token lifetime;
+- waits for the HTTPS health check before printing the access URL.
+
+Hatch creates a random RDP password and Guacamole JWT secret unless you provide values for a manually managed container. The access URL is a bearer credential. Anyone who has it can open the desktop until its launch token expires.
+
+## Run the container without the CLI
+
+Build the image:
+
+```bash
 docker build -t hatch:local .
-
-# Optional: set HATCH_START_URL when Chromium should open a specific page.
-docker run -d \
-  --name hatch \
-  -p 8443:443 \
-  --restart unless-stopped \
-  --shm-size=1g \
-  --security-opt no-new-privileges:true \
-  -e RDP_USER=oauth \
-  -e HATCH_START_URL="https://www.google.com" \
-  hatch:local
-
-docker logs hatch
 ```
 
-Copy the generated `Hatch access URL` from:
-
-```bash
-docker logs hatch
-```
-
-If the printed URL contains `<host>`, replace it with your server name or IP and adjust the port if you mapped container port `443` to a different host port. Open:
-
-```text
-https://<server>:8443/hatch/?token=<jwt>
-```
-
-Accept the self-signed certificate warning. Hatch starts a Guacamole session with the signed JWT and opens the browser desktop without a Guacamole username/password prompt. Treat the access URL and container logs as sensitive because the bearer token grants desktop access until it expires. Direct visits to `/guacamole/` without a token land on the Hatch page instead of the Guacamole login page. The generated RDP credentials are written inside the container at `/var/log/hatch/rdp-credentials.log` for operator recovery.
-
-### Pasting Text from iPad
-
-On an iPad, Guacamole hides its side menu while the remote desktop is open. To paste text into the Hatch desktop:
-
-1. Swipe from the left edge of the Guacamole screen toward the right to open the Guacamole side menu.
-2. Paste or type the text into the Guacamole clipboard text box.
-3. Tap back into the remote Chromium desktop.
-4. Paste in Chromium with the on-screen keyboard shortcut, a hardware keyboard shortcut, or the browser text field's paste action.
-
-Stop Hatch with:
-
-```bash
-docker stop hatch
-docker rm hatch
-```
-
-## OAuth Callback Mode
-
-Some OAuth tools start a local callback listener such as:
-
-```text
-http://127.0.0.1:8765/oauth/callback
-```
-
-If Chromium inside Hatch must reach a listener running on the Docker host at `127.0.0.1`, run Hatch with Docker host networking. With host networking, Docker ignores `-p`, so choose the HTTPS listener port inside the container:
+For a browser that must reach a callback listener on Linux host loopback:
 
 ```bash
 docker run -d \
@@ -140,119 +144,90 @@ docker run -d \
   --restart unless-stopped \
   --shm-size=1g \
   --security-opt no-new-privileges:true \
-  -e RDP_USER=oauth \
   -e HATCH_HTTPS_PORT=8443 \
+  -e HATCH_START_URL='https://example.com/oauth/authorize?...' \
   hatch:local
 ```
 
-Open:
+Read the generated access URL:
 
-```text
-https://<server>:8443/hatch/?token=<jwt-from-docker-logs>
+```bash
+docker logs hatch
 ```
 
-The RDP service is bound to loopback inside the container. Use the HTTPS Guacamole endpoint instead of connecting an RDP client directly.
+A manual container defaults to a 12-hour launch-token lifetime. Set `HATCH_GUAC_LAUNCH_TTL_SECONDS` to shorten it.
+
+The repository also publishes `ghcr.io/everydaydevopsio/hatch`. The CLI currently uses the locally built image so its binary and container can evolve together without registry authentication.
 
 ## Configuration
 
-Common environment variables:
+Common container environment variables:
 
-```text
-RDP_USER=oauth
-RDP_PASSWORD=
-HATCH_GUAC_JWT_SECRET=
-HATCH_GUAC_LAUNCH_TTL_SECONDS=43200
-HATCH_HTTPS_PORT=443
-HATCH_START_URL=about:blank
-HATCH_MAC_SHORTCUTS=1
-CHROMIUM_EXTRA_FLAGS=
-HATCH_TLS_CERT=/etc/hatch/tls/hatch.crt
-HATCH_TLS_KEY=/etc/hatch/tls/hatch.key
-HATCH_TLS_CN=hatch.local
-HATCH_TLS_DAYS=365
-```
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `RDP_USER` | `oauth` | Linux user for the desktop session |
+| `RDP_PASSWORD` | generated | RDP password stored in the protected recovery log |
+| `HATCH_GUAC_JWT_SECRET` | generated | Guacamole JWT signing secret; must be at least 32 characters |
+| `HATCH_GUAC_LAUNCH_TTL_SECONDS` | `43200` | Launch-token lifetime for manually started containers |
+| `HATCH_HTTPS_PORT` | `443` | HTTPS listener inside the container or on the host in host-network mode |
+| `HATCH_START_URL` | `about:blank` | Initial Chromium URL |
+| `HATCH_MAC_SHORTCUTS` | `1` | Map common Mac shortcuts to Linux Chromium shortcuts |
+| `CHROMIUM_EXTRA_FLAGS` | empty | Additional Chromium command-line flags |
+| `HATCH_TLS_CERT` | `/etc/hatch/tls/hatch.crt` | Certificate path |
+| `HATCH_TLS_KEY` | `/etc/hatch/tls/hatch.key` | Private-key path |
+| `HATCH_TLS_CN` | `hatch.local` | Common name for the generated certificate |
+| `HATCH_TLS_DAYS` | `365` | Lifetime of the generated certificate |
 
-Leave `RDP_PASSWORD` blank to generate a random password. Leave `HATCH_GUAC_JWT_SECRET` blank to generate a per-container signing secret for Guacamole JWT authentication. `HATCH_GUAC_LAUNCH_TTL_SECONDS` controls how long the generated Hatch access URL remains valid.
+Use [INSTALL.md](INSTALL.md) for custom TLS mounts, Docker Compose, browser-profile persistence, clipboard instructions, and troubleshooting.
 
-Set `HATCH_START_URL` to the page Chromium should open when the remote desktop session starts. The default is `about:blank`.
+## Supported environments
 
-`HATCH_MAC_SHORTCUTS=1` maps remote `Super`/Mac-style shortcuts such as `Cmd+V`, `Cmd+C`, and `Cmd+L` to the Linux `Ctrl` shortcuts expected by Chromium. Set it to `0` to disable this shortcut bridge.
+OAuth callback mode targets a native Linux Docker Engine host. Docker Desktop on macOS and Windows virtualizes host networking differently, so a container's `127.0.0.1` may not reach a callback listener on the desktop host.
 
-To use your own certificate, mount the certificate and key into the container and set `HATCH_TLS_CERT` and `HATCH_TLS_KEY`.
+The Go CLI can detect missing or stopped Docker installations on macOS, Windows, and common Linux distributions. That guidance helps with setup, but it does not change the callback networking limitation.
 
-## Docker Compose Option
+## Security
+
+Hatch exposes a complete interactive browser session. Treat it like temporary administrative access.
+
+- Keep the HTTPS endpoint on Tailscale, another VPN, or a trusted private network.
+- Do not expose xrdp directly. It listens on loopback inside the container.
+- Protect container logs because they contain the signed access URL.
+- Replace the self-signed certificate when users cannot verify the server through another trusted channel.
+- Keep browser profiles ephemeral unless persistence is required.
+- Protect any persisted Chromium profile as authentication material.
+- Stop sessions when the OAuth flow finishes.
+
+With `no-new-privileges` enabled, Chromium cannot use its setuid sandbox. Hatch adds the compatibility flags documented in [INSTALL.md](INSTALL.md). Restrict network exposure and keep the image updated.
+
+## Documentation
+
+| Guide | Purpose |
+| --- | --- |
+| [CLI guide](docs/CLI.md) | Command behavior, Docker checks, ports, defaults, and examples |
+| [Installation and operations](INSTALL.md) | Manual container setup, TLS, Compose, troubleshooting, and security |
+| [Product requirements](PRD.md) | Product scope and design intent |
+
+## Development
 
 ```bash
-cp .env.example .env
-# Optional: edit HATCH_START_URL in .env before starting.
-docker compose up -d --build
-docker compose logs hatch
+git clone https://github.com/everydaydevopsio/hatch.git
+cd hatch
+
+make setup
+make test
+make vet
+make build
 ```
 
-The compose file uses host networking and listens on `${HATCH_HTTPS_PORT:-8443}` directly on the host. Stop it with:
+Run the Guacamole end-to-end smoke test with:
 
 ```bash
-docker compose down
+make e2e
 ```
 
-The compose file uses host networking for OAuth callback mode. In this mode Chromium's `127.0.0.1` is the Linux host loopback, so dynamic callback URLs such as `http://127.0.0.1:40397/callback/...` can reach the listener started by the OAuth tool. Docker ignores compose port mappings when host networking is enabled, so Hatch listens on `${HATCH_HTTPS_PORT:-8443}` directly on the host.
+The test builds Hatch, starts a temporary HTTPS container, launches Guacamole through the signed URL, opens the RDP connection, and verifies Chromium starts at the configured URL.
 
-## E2E Guacamole Test
+## License
 
-Run the smoke test from the repository root:
-
-```bash
-scripts/e2e-guacamole.sh
-```
-
-The test builds Hatch, starts one temporary container, waits for HTTPS health, confirms direct `/guacamole/` access redirects to Hatch, launches Guacamole through the generated JWT-backed Hatch URL with Playwright, opens the Hatch connection, sets `HATCH_START_URL` from `${HATCH_E2E_URL:-https://www.google.com}`, and verifies Chromium starts at that value.
-
-Required host tools:
-
-- Docker
-- `nc`
-- Node.js
-- npm
-
-## Project Layout
-
-```text
-.
-├── Dockerfile
-├── docker-compose.yml
-├── .env.example
-├── cmd/hatch/
-│   ├── main.go
-│   └── main_test.go
-├── config/
-│   ├── chromium-launch.sh
-│   ├── login-shell.sh
-│   ├── startwm.sh
-│   └── supervisord.conf
-├── docs/
-│   └── CLI.md
-├── scripts/
-│   ├── e2e-guacamole.sh
-│   ├── entrypoint.sh
-│   ├── guacamole-config.sh
-│   └── healthcheck.sh
-└── .github/workflows/
-    ├── docker.yml
-    └── go.yml
-```
-
-## Supported Host
-
-The Hatch container targets Linux Docker Engine hosts for OAuth callback mode. The Go CLI itself provides Docker prerequisite guidance on macOS, Linux, and Windows. Docker Desktop host networking is virtualized differently from a native Linux Docker Engine host, so callback behavior involving host loopback should be verified on desktop operating systems.
-
-## Security Notes
-
-Do not publish direct RDP access. Hatch exposes HTTPS for browser access, and xrdp listens on `127.0.0.1:3389` inside the container.
-
-The default certificate is self-signed. Use a reverse proxy, load balancer, or mounted certificate files if you need a publicly trusted certificate. Certbot HTTP-01 validation requires public port 80, while DNS-01 can issue certificates without opening port 80.
-
-When the container is started with `--security-opt no-new-privileges:true`, Hatch automatically adds Chromium's `--no-sandbox` compatibility flag because the setuid sandbox cannot run under that kernel setting. Hatch also adds Chromium's `--test-type` flag in that mode to suppress Chromium's unsupported command-line flag warning.
-
-Browser persistence is off by default. If persistent browser sessions are required, mount `/home/oauth/.config/chromium` as a Docker volume and protect it as sensitive authentication material.
-
-See [INSTALL.md](INSTALL.md) for operational details and troubleshooting.
+Hatch is available under the [MIT License](LICENSE).
