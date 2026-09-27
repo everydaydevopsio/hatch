@@ -104,7 +104,7 @@ func TestRunOpenUsage(t *testing.T) {
 		{"open", "https://example.com/oauth?client_id=abc", "extra"},
 		{"open", "--port"},
 	} {
-		if err := run(args); err == nil || !strings.Contains(err.Error(), "usage: hatch open [--port port] <url>") {
+		if err := run(args); err == nil || !strings.Contains(err.Error(), "usage: hatch open [--port port] [--profile name] <url>") {
 			t.Fatalf("run(%v) error = %v, want open usage", args, err)
 		}
 	}
@@ -123,14 +123,19 @@ func TestRunStopUsage(t *testing.T) {
 
 func TestParseOpenArgs(t *testing.T) {
 	tests := []struct {
-		name string
-		args []string
-		url  string
-		port int
+		name    string
+		args    []string
+		url     string
+		port    int
+		profile string
 	}{
 		{name: "dynamic port", args: []string{"https://example.com/oauth"}, url: "https://example.com/oauth"},
 		{name: "separate port", args: []string{"--port", "8443", "https://example.com/oauth"}, url: "https://example.com/oauth", port: 8443},
 		{name: "equals port", args: []string{"--port=9443", "https://example.com/oauth"}, url: "https://example.com/oauth", port: 9443},
+		{name: "named profile", args: []string{"--profile", "google", "https://example.com/oauth"}, url: "https://example.com/oauth", profile: "google"},
+		{name: "equals profile", args: []string{"--profile=google-work", "https://example.com/oauth"}, url: "https://example.com/oauth", profile: "google-work"},
+		{name: "one character profile", args: []string{"--profile", "g", "https://example.com/oauth"}, url: "https://example.com/oauth", profile: "g"},
+		{name: "maximum length profile", args: []string{"--profile", strings.Repeat("a", 32), "https://example.com/oauth"}, url: "https://example.com/oauth", profile: strings.Repeat("a", 32)},
 	}
 
 	for _, tt := range tests {
@@ -139,10 +144,27 @@ func TestParseOpenArgs(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parseOpenArgs() error = %v", err)
 			}
-			if got.URL != tt.url || got.Port != tt.port {
-				t.Fatalf("parseOpenArgs() = %+v, want URL=%q port=%d", got, tt.url, tt.port)
+			if got.URL != tt.url || got.Port != tt.port || got.Profile != tt.profile {
+				t.Fatalf("parseOpenArgs() = %+v, want URL=%q port=%d profile=%q", got, tt.url, tt.port, tt.profile)
 			}
 		})
+	}
+}
+
+func TestParseOpenArgsRejectsInvalidProfile(t *testing.T) {
+	for _, args := range [][]string{
+		{"--profile", "", "https://example.com/oauth"},
+		{"--profile", "../other", "https://example.com/oauth"},
+		{"--profile", "google work", "https://example.com/oauth"},
+		{"--profile", "Google", "https://example.com/oauth"},
+		{"--profile", "google-", "https://example.com/oauth"},
+		{"--profile", strings.Repeat("a", 33), "https://example.com/oauth"},
+		{"--profile", "google", "--profile", "work", "https://example.com/oauth"},
+		{"--profile", "https://example.com/oauth"},
+	} {
+		if _, err := parseOpenArgs(args); err == nil {
+			t.Fatalf("parseOpenArgs(%v) accepted invalid profile", args)
+		}
 	}
 }
 
@@ -162,7 +184,7 @@ func TestParseOpenArgsRejectsInvalidPort(t *testing.T) {
 func TestLaunchContainerOptionsUseLocalImage(t *testing.T) {
 	labels := map[string]string{"io.everydaydevops.hatch.managed": "true"}
 
-	opts := launchContainerOptions("hatch-test", "https://example.com/oauth", 8443, labels)
+	opts := launchContainerOptions("hatch-test", "https://example.com/oauth", 8443, labels, "")
 
 	if opts.Image != "" {
 		t.Fatalf("ContainerCreateOptions.Image = %q, want empty because Config.Image is set", opts.Image)
@@ -172,6 +194,35 @@ func TestLaunchContainerOptionsUseLocalImage(t *testing.T) {
 	}
 	if opts.HostConfig == nil || opts.HostConfig.NetworkMode != "host" {
 		t.Fatalf("NetworkMode = %q, want host", opts.HostConfig.NetworkMode)
+	}
+}
+
+func TestProfileContainerUsesPersistentVolumeAndStableName(t *testing.T) {
+	if got := sessionContainerName("first", "google"); got != "hatch-profile-google" {
+		t.Fatalf("sessionContainerName(first, google) = %q", got)
+	}
+	if got := sessionContainerName("second", "google"); got != "hatch-profile-google" {
+		t.Fatalf("sessionContainerName(second, google) = %q, want same name", got)
+	}
+	if got := sessionContainerName("second", "work"); got == "hatch-profile-google" {
+		t.Fatalf("distinct profiles share a container name")
+	}
+	if got := sessionContainerName("second", ""); got != "hatch-second" {
+		t.Fatalf("ephemeral sessionContainerName = %q", got)
+	}
+
+	opts := launchContainerOptions("hatch-profile-google", "https://example.com/oauth", 8443, nil, "google")
+	if opts.HostConfig == nil || len(opts.HostConfig.Mounts) != 1 {
+		t.Fatalf("profile mounts = %+v, want one named volume", opts.HostConfig)
+	}
+	mount := opts.HostConfig.Mounts[0]
+	if string(mount.Type) != "volume" || mount.Source != "hatch-chromium-google" || mount.Target != "/home/oauth/.config/chromium" || mount.ReadOnly {
+		t.Fatalf("profile mount = %+v", mount)
+	}
+
+	ephemeral := launchContainerOptions("hatch-second", "https://example.com/oauth", 8444, nil, "")
+	if len(ephemeral.HostConfig.Mounts) != 0 {
+		t.Fatalf("ephemeral session has profile mounts: %+v", ephemeral.HostConfig.Mounts)
 	}
 }
 

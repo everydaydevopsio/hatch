@@ -92,6 +92,7 @@ hatch init https://devbox.tailnet.ts.net:8443/
 ```bash
 hatch open 'https://example.com/oauth/authorize?...'
 hatch open --port 8443 'https://example.com/oauth/authorize?...'
+hatch open --profile google 'https://example.com/oauth/authorize?...'
 ```
 
 Hatch will:
@@ -100,7 +101,7 @@ Hatch will:
 2. validate that the start URL uses HTTP or HTTPS;
 3. use `--port`, the configured port, or an available dynamic port from `18000-18999`;
 4. generate a short session ID;
-5. create a Docker container named `hatch-<session>`;
+5. create a Docker container named `hatch-<session>`, or `hatch-profile-<name>` when a profile is selected;
 6. run the container with host networking so Chromium can reach OAuth callback listeners on server loopback;
 7. set `HATCH_START_URL` to the supplied URL;
 8. set the Hatch HTTPS listener to the selected port;
@@ -119,6 +120,14 @@ Stop with:    hatch stop 8ac4d911
 ```
 
 The container uses Docker host networking intentionally. This preserves the key OAuth behavior where a redirect such as `http://127.0.0.1:8765/callback` reaches the CLI process running on the Linux host.
+
+### Reuse a browser profile
+
+Add `--profile google` to each `hatch open` command to keep Chromium cookies and sign-in state across sessions. Hatch mounts the Docker named volume `hatch-chromium-google` at `/home/oauth/.config/chromium`. The profile name may contain 1–32 lowercase letters, digits, and hyphens, and must start and end with a letter or digit. Different names keep separate browser profiles. Omitting `--profile` starts a disposable browser, as before.
+
+Stop the current session before opening another session with the same profile. Hatch reserves a stable container name for each profile, so Docker rejects concurrent use of that profile. `hatch stop` removes the container but keeps the profile volume. To discard the saved sign-in state after stopping its session, run `docker volume rm hatch-chromium-google`.
+
+Profile volumes contain sensitive authentication data. Protect Docker access and any host backups that include the volume. Google may still require sign-in again when its own session expires.
 
 ## List sessions
 

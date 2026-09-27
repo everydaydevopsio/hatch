@@ -253,6 +253,6 @@ The default certificate is self-signed. Use a reverse proxy, load balancer, or m
 
 When the container is started with `--security-opt no-new-privileges:true`, Hatch automatically adds Chromium's `--no-sandbox` compatibility flag because the setuid sandbox cannot run under that kernel setting. Hatch also adds Chromium's `--test-type` flag in that mode to suppress Chromium's unsupported command-line flag warning.
 
-Browser persistence is off by default. If persistent browser sessions are required, mount `/home/oauth/.config/chromium` as a Docker volume and protect it as sensitive authentication material.
+Browser persistence is off by default. For CLI sessions, use `hatch open --profile google '<url>'` each time to reuse a named Docker volume; stop the previous session before reopening the same profile. For direct Docker or Compose use, mount `/home/oauth/.config/chromium` as a Docker volume. Protect profiles as sensitive authentication material. See [CLI profile usage](docs/CLI.md#reuse-a-browser-profile).
 
 See [INSTALL.md](INSTALL.md) for operational details and troubleshooting.

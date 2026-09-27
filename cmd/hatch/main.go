@@ -22,6 +22,7 @@ import (
 
 	"github.com/moby/moby/api/pkg/stdcopy"
 	containertypes "github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/mount"
 	mobyclient "github.com/moby/moby/client"
 	"gopkg.in/yaml.v3"
 )
@@ -35,6 +36,7 @@ const (
 )
 
 var accessPathRE = regexp.MustCompile(`Hatch access path:\s+(/hatch/\?token=[^\s]+)`)
+var profileNameRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`)
 
 type config struct {
 	Hostname string `yaml:"hostname"`
@@ -42,8 +44,9 @@ type config struct {
 }
 
 type openOptions struct {
-	URL  string
-	Port int
+	URL     string
+	Port    int
+	Profile string
 }
 
 type dockerState int
@@ -118,11 +121,11 @@ func run(args []string) error {
 }
 
 func printUsage() {
-	fmt.Println(`Hatch launches an ephemeral browser desktop for an OAuth URL.
+	fmt.Println(`Hatch launches a browser desktop for an OAuth URL.
 
 Usage:
   hatch init [hostname[:port]|hostname port]
-  hatch open [--port port] <url>
+  hatch open [--port port] [--profile name] <url>
   hatch list
   hatch stop <session>|--all
 
@@ -131,6 +134,7 @@ Examples:
   hatch init devbox.tailnet.ts.net 8443
   hatch init devbox.tailnet.ts.net:8443
   hatch open --port 8443 'https://example.com/oauth/authorize?...'
+  hatch open --profile google 'https://example.com/oauth/authorize?...'
   hatch open 'https://example.com/oauth/authorize?...'
   hatch list
   hatch stop --all
@@ -260,7 +264,7 @@ func parseEndpoint(input, rawPort string) (string, int, error) {
 
 func parseOpenArgs(args []string) (openOptions, error) {
 	if len(args) == 0 {
-		return openOptions{}, errors.New("usage: hatch open [--port port] <url>")
+		return openOptions{}, errors.New("usage: hatch open [--port port] [--profile name] <url>")
 	}
 
 	var opts openOptions
@@ -272,7 +276,7 @@ func parseOpenArgs(args []string) (openOptions, error) {
 				return openOptions{}, errors.New("port specified more than once")
 			}
 			if i+1 >= len(args) {
-				return openOptions{}, errors.New("usage: hatch open [--port port] <url>")
+				return openOptions{}, errors.New("usage: hatch open [--port port] [--profile name] <url>")
 			}
 			port, err := parsePort(args[i+1])
 			if err != nil {
@@ -289,17 +293,35 @@ func parseOpenArgs(args []string) (openOptions, error) {
 				return openOptions{}, err
 			}
 			opts.Port = port
+		case arg == "--profile" || strings.HasPrefix(arg, "--profile="):
+			if opts.Profile != "" {
+				return openOptions{}, errors.New("profile specified more than once")
+			}
+			var name string
+			if arg == "--profile" {
+				if i+1 >= len(args) {
+					return openOptions{}, errors.New("usage: hatch open [--port port] [--profile name] <url>")
+				}
+				i++
+				name = args[i]
+			} else {
+				name = strings.TrimPrefix(arg, "--profile=")
+			}
+			if !profileNameRE.MatchString(name) {
+				return openOptions{}, fmt.Errorf("invalid profile %q: use 1-32 lowercase letters, digits, or hyphens; start and end with a letter or digit", name)
+			}
+			opts.Profile = name
 		case strings.HasPrefix(arg, "-"):
 			return openOptions{}, fmt.Errorf("unknown option %q", arg)
 		default:
 			if opts.URL != "" {
-				return openOptions{}, errors.New("usage: hatch open [--port port] <url>")
+				return openOptions{}, errors.New("usage: hatch open [--port port] [--profile name] <url>")
 			}
 			opts.URL = arg
 		}
 	}
 	if opts.URL == "" {
-		return openOptions{}, errors.New("usage: hatch open [--port port] <url>")
+		return openOptions{}, errors.New("usage: hatch open [--port port] [--profile name] <url>")
 	}
 	return opts, nil
 }
@@ -574,7 +596,7 @@ func launch(opts openOptions) error {
 	if err != nil {
 		return err
 	}
-	name := "hatch-" + sessionID
+	name := sessionContainerName(sessionID, opts.Profile)
 
 	labels := map[string]string{
 		"io.everydaydevops.hatch.managed":   "true",
@@ -583,7 +605,7 @@ func launch(opts openOptions) error {
 		"io.everydaydevops.hatch.port":      strconv.Itoa(port),
 	}
 
-	created, err := cli.ContainerCreate(ctx, launchContainerOptions(name, startURL, port, labels))
+	created, err := cli.ContainerCreate(ctx, launchContainerOptions(name, startURL, port, labels, opts.Profile))
 	if err != nil {
 		return fmt.Errorf("create container from %s: %w", defaultImage, err)
 	}
@@ -612,6 +634,9 @@ func launch(opts openOptions) error {
 	fmt.Printf("Session:      %s\n", sessionID)
 	fmt.Printf("Container:    %s\n", name)
 	fmt.Printf("Start URL:    %s\n", startURL)
+	if opts.Profile != "" {
+		fmt.Printf("Profile:      %s (Docker volume hatch-chromium-%s)\n", opts.Profile, opts.Profile)
+	}
 	fmt.Printf("Browser URL:  https://%s:%d%s\n", cfg.Hostname, port, accessPath)
 	fmt.Printf("Stop with:    hatch stop %s\n", sessionID)
 	return nil
@@ -636,8 +661,15 @@ func requireFreePort(port int) (int, error) {
 	return port, nil
 }
 
-func launchContainerOptions(name, startURL string, port int, labels map[string]string) mobyclient.ContainerCreateOptions {
-	return mobyclient.ContainerCreateOptions{
+func sessionContainerName(sessionID, profile string) string {
+	if profile != "" {
+		return "hatch-profile-" + profile
+	}
+	return "hatch-" + sessionID
+}
+
+func launchContainerOptions(name, startURL string, port int, labels map[string]string, profile string) mobyclient.ContainerCreateOptions {
+	opts := mobyclient.ContainerCreateOptions{
 		Name: name,
 		Config: &containertypes.Config{
 			Image: defaultImage,
@@ -654,6 +686,14 @@ func launchContainerOptions(name, startURL string, port int, labels map[string]s
 			SecurityOpt: []string{"no-new-privileges:true"},
 		},
 	}
+	if profile != "" {
+		opts.HostConfig.Mounts = []mount.Mount{{
+			Type:   mount.TypeVolume,
+			Source: "hatch-chromium-" + profile,
+			Target: "/home/oauth/.config/chromium",
+		}}
+	}
+	return opts
 }
 
 func validateStartURL(raw string) (string, error) {
