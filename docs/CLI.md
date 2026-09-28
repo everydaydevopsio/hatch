@@ -125,7 +125,7 @@ The container uses Docker host networking intentionally. This preserves the key 
 
 Add `--profile google` to each `hatch open` command to keep Chromium cookies and sign-in state across sessions. Hatch mounts the Docker named volume `hatch-chromium-google` at `/home/oauth/.config/chromium`. The profile name may contain 1–32 lowercase letters, digits, and hyphens, and must start and end with a letter or digit. Different names keep separate browser profiles. Omitting `--profile` starts a disposable browser, as before.
 
-Stop the current session before opening another session with the same profile. Hatch reserves a stable container name for each profile, so Docker rejects concurrent use of that profile. `hatch stop` removes the container but keeps the profile volume. To discard the saved sign-in state after stopping its session, run `docker volume rm hatch-chromium-google`.
+Stop the current session before opening another session with the same profile. Hatch reserves a stable container name for each profile, so Docker rejects concurrent use of that profile. `hatch stop` asks Chromium to close, waits for it to exit, and uses a bounded termination fallback if it hangs. It removes the container but keeps the profile volume. To discard the saved sign-in state after stopping its session, run `docker volume rm hatch-chromium-google`.
 
 Profile volumes contain sensitive authentication data. Protect Docker access and any host backups that include the volume. Google may still require sign-in again when its own session expires.
 

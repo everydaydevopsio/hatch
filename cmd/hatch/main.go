@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	_ "embed"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -37,6 +38,9 @@ const (
 
 var accessPathRE = regexp.MustCompile(`Hatch access path:\s+(/hatch/\?token=[^\s]+)`)
 var profileNameRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`)
+
+//go:embed chromium-close.sh
+var chromiumCloseScript string
 
 type config struct {
 	Hostname string `yaml:"hostname"`
@@ -604,6 +608,11 @@ func launch(opts openOptions) error {
 		"io.everydaydevops.hatch.start-url": redactedStartURL(startURL),
 		"io.everydaydevops.hatch.port":      strconv.Itoa(port),
 	}
+	if opts.Profile != "" {
+		if err := removeStaleProfileContainer(ctx, cli, name); err != nil {
+			return fmt.Errorf("prepare profile %q: %w", opts.Profile, err)
+		}
+	}
 
 	created, err := cli.ContainerCreate(ctx, launchContainerOptions(name, startURL, port, labels, opts.Profile))
 	if err != nil {
@@ -877,7 +886,7 @@ func stopSession(session string) error {
 		return fmt.Errorf("session prefix %q matches multiple sessions", session)
 	}
 
-	if _, err := cli.ContainerRemove(ctx, matches[0].ID, mobyclient.ContainerRemoveOptions{Force: true}); err != nil {
+	if err := removeSessionContainer(ctx, cli, matches[0]); err != nil {
 		return fmt.Errorf("remove session: %w", err)
 	}
 	fmt.Printf("Stopped %s\n", matches[0].Labels["io.everydaydevops.hatch.session"])
@@ -906,10 +915,107 @@ func stopAllSessions() error {
 		return containers[i].Labels["io.everydaydevops.hatch.session"] < containers[j].Labels["io.everydaydevops.hatch.session"]
 	})
 	for _, ctr := range containers {
-		if _, err := cli.ContainerRemove(ctx, ctr.ID, mobyclient.ContainerRemoveOptions{Force: true}); err != nil {
+		if err := removeSessionContainer(ctx, cli, ctr); err != nil {
 			return fmt.Errorf("remove session %s: %w", ctr.Labels["io.everydaydevops.hatch.session"], err)
 		}
 		fmt.Printf("Stopped %s\n", ctr.Labels["io.everydaydevops.hatch.session"])
+	}
+	return nil
+}
+
+type sessionLifecycleClient interface {
+	ContainerList(context.Context, mobyclient.ContainerListOptions) (mobyclient.ContainerListResult, error)
+	ContainerStop(context.Context, string, mobyclient.ContainerStopOptions) (mobyclient.ContainerStopResult, error)
+	ContainerRemove(context.Context, string, mobyclient.ContainerRemoveOptions) (mobyclient.ContainerRemoveResult, error)
+	ExecCreate(context.Context, string, mobyclient.ExecCreateOptions) (mobyclient.ExecCreateResult, error)
+	ExecStart(context.Context, string, mobyclient.ExecStartOptions) (mobyclient.ExecStartResult, error)
+	ExecInspect(context.Context, string, mobyclient.ExecInspectOptions) (mobyclient.ExecInspectResult, error)
+}
+
+func isProfileContainer(ctr containertypes.Summary) bool {
+	for _, name := range ctr.Names {
+		if strings.HasPrefix(name, "/hatch-profile-") {
+			return true
+		}
+	}
+	return false
+}
+
+func removeSessionContainer(ctx context.Context, cli sessionLifecycleClient, ctr containertypes.Summary) error {
+	if !isProfileContainer(ctr) {
+		_, err := cli.ContainerRemove(ctx, ctr.ID, mobyclient.ContainerRemoveOptions{Force: true})
+		return err
+	}
+	if ctr.State == containertypes.StateRunning {
+		if err := closeChromium(ctx, cli, ctr.ID); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Chromium close was incomplete for %s: %v; stopping the container anyway.\n", ctr.ID, err)
+		}
+		graceSeconds := 30
+		stopCtx, cancel := context.WithTimeout(ctx, 40*time.Second)
+		defer cancel()
+		if _, err := cli.ContainerStop(stopCtx, ctr.ID, mobyclient.ContainerStopOptions{Timeout: &graceSeconds}); err != nil {
+			return fmt.Errorf("stop profile container gracefully: %w", err)
+		}
+	}
+	if _, err := cli.ContainerRemove(ctx, ctr.ID, mobyclient.ContainerRemoveOptions{}); err != nil {
+		return fmt.Errorf("remove profile container: %w", err)
+	}
+	return nil
+}
+
+func closeChromium(ctx context.Context, cli sessionLifecycleClient, containerID string) error {
+	closeCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	exec, err := cli.ExecCreate(closeCtx, containerID, mobyclient.ExecCreateOptions{
+		User: "oauth",
+		Cmd:  []string{"/bin/sh", "-c", chromiumCloseScript},
+	})
+	if err != nil {
+		return fmt.Errorf("create close command: %w", err)
+	}
+	if _, err := cli.ExecStart(closeCtx, exec.ID, mobyclient.ExecStartOptions{Detach: true}); err != nil {
+		return fmt.Errorf("start close command: %w", err)
+	}
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		result, err := cli.ExecInspect(closeCtx, exec.ID, mobyclient.ExecInspectOptions{})
+		if err != nil {
+			return fmt.Errorf("inspect close command: %w", err)
+		}
+		if !result.Running {
+			if result.ExitCode != 0 {
+				return fmt.Errorf("close command exited with status %d", result.ExitCode)
+			}
+			return nil
+		}
+		select {
+		case <-closeCtx.Done():
+			return closeCtx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func removeStaleProfileContainer(ctx context.Context, cli sessionLifecycleClient, name string) error {
+	result, err := cli.ContainerList(ctx, mobyclient.ContainerListOptions{All: true})
+	if err != nil {
+		return fmt.Errorf("list containers: %w", err)
+	}
+	for _, ctr := range result.Items {
+		if ctr.Labels["io.everydaydevops.hatch.managed"] != "true" {
+			continue
+		}
+		matchesName := false
+		for _, candidate := range ctr.Names {
+			if candidate == "/"+name {
+				matchesName = true
+				break
+			}
+		}
+		if matchesName && (ctr.State == containertypes.StateExited || ctr.State == containertypes.StateCreated || ctr.State == containertypes.StateDead) {
+			return removeSessionContainer(ctx, cli, ctr)
+		}
 	}
 	return nil
 }

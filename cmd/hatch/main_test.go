@@ -1,12 +1,70 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"net"
 	"strings"
 	"testing"
 
 	containertypes "github.com/moby/moby/api/types/container"
+	mobyclient "github.com/moby/moby/client"
 )
+
+type sessionLifecycleFake struct {
+	containers   []containertypes.Summary
+	stopErr      error
+	execExitCode int
+	calls        []string
+}
+
+func (f *sessionLifecycleFake) ExecCreate(_ context.Context, id string, opts mobyclient.ExecCreateOptions) (mobyclient.ExecCreateResult, error) {
+	if opts.User != "oauth" || len(opts.Cmd) != 3 || opts.Cmd[0] != "/bin/sh" || opts.Cmd[1] != "-c" || !strings.Contains(opts.Cmd[2], "xdotool search --onlyvisible --class chromium windowclose") {
+		return mobyclient.ExecCreateResult{}, errors.New("wrong Chromium close command")
+	}
+	f.calls = append(f.calls, "exec-create:"+id)
+	return mobyclient.ExecCreateResult{ID: "close-id"}, nil
+}
+
+func (f *sessionLifecycleFake) ExecStart(_ context.Context, id string, opts mobyclient.ExecStartOptions) (mobyclient.ExecStartResult, error) {
+	if !opts.Detach {
+		return mobyclient.ExecStartResult{}, errors.New("Chromium close must start detached")
+	}
+	f.calls = append(f.calls, "exec-start:"+id)
+	return mobyclient.ExecStartResult{}, nil
+}
+
+func (f *sessionLifecycleFake) ExecInspect(_ context.Context, id string, _ mobyclient.ExecInspectOptions) (mobyclient.ExecInspectResult, error) {
+	f.calls = append(f.calls, "exec-inspect:"+id)
+	return mobyclient.ExecInspectResult{ExitCode: f.execExitCode}, nil
+}
+
+func (f *sessionLifecycleFake) ContainerList(_ context.Context, opts mobyclient.ContainerListOptions) (mobyclient.ContainerListResult, error) {
+	if !opts.All {
+		return mobyclient.ContainerListResult{}, errors.New("expected all containers")
+	}
+	return mobyclient.ContainerListResult{Items: f.containers}, nil
+}
+
+func (f *sessionLifecycleFake) ContainerStop(_ context.Context, id string, opts mobyclient.ContainerStopOptions) (mobyclient.ContainerStopResult, error) {
+	if opts.Timeout == nil || *opts.Timeout < 30 {
+		return mobyclient.ContainerStopResult{}, errors.New("expected a grace period of at least 30 seconds")
+	}
+	f.calls = append(f.calls, "stop:"+id)
+	return mobyclient.ContainerStopResult{}, f.stopErr
+}
+
+func (f *sessionLifecycleFake) ContainerRemove(_ context.Context, id string, opts mobyclient.ContainerRemoveOptions) (mobyclient.ContainerRemoveResult, error) {
+	if opts.RemoveVolumes {
+		return mobyclient.ContainerRemoveResult{}, errors.New("profile volume must be preserved")
+	}
+	if opts.Force {
+		f.calls = append(f.calls, "force-remove:"+id)
+	} else {
+		f.calls = append(f.calls, "remove:"+id)
+	}
+	return mobyclient.ContainerRemoveResult{}, nil
+}
 
 func TestNormalizeHostname(t *testing.T) {
 	tests := []struct {
@@ -223,6 +281,68 @@ func TestProfileContainerUsesPersistentVolumeAndStableName(t *testing.T) {
 	ephemeral := launchContainerOptions("hatch-second", "https://example.com/oauth", 8444, nil, "")
 	if len(ephemeral.HostConfig.Mounts) != 0 {
 		t.Fatalf("ephemeral session has profile mounts: %+v", ephemeral.HostConfig.Mounts)
+	}
+}
+
+func TestProfileSessionStopsBeforeRemoval(t *testing.T) {
+	ctr := containertypes.Summary{ID: "profile-id", Names: []string{"/hatch-profile-google"}, State: containertypes.StateRunning}
+	fake := &sessionLifecycleFake{}
+	if err := removeSessionContainer(context.Background(), fake, ctr); err != nil {
+		t.Fatalf("removeSessionContainer() error = %v", err)
+	}
+	if got := strings.Join(fake.calls, ","); got != "exec-create:profile-id,exec-start:close-id,exec-inspect:close-id,stop:profile-id,remove:profile-id" {
+		t.Fatalf("profile lifecycle = %q", got)
+	}
+
+	fake = &sessionLifecycleFake{stopErr: errors.New("stop failed")}
+	if err := removeSessionContainer(context.Background(), fake, ctr); err == nil {
+		t.Fatal("stop failure must block profile removal")
+	}
+	if got := strings.Join(fake.calls, ","); got != "exec-create:profile-id,exec-start:close-id,exec-inspect:close-id,stop:profile-id" {
+		t.Fatalf("failed stop lifecycle = %q", got)
+	}
+
+	fake = &sessionLifecycleFake{execExitCode: 124}
+	if err := removeSessionContainer(context.Background(), fake, ctr); err != nil {
+		t.Fatalf("timed-out Chromium close must still stop container: %v", err)
+	}
+	if got := strings.Join(fake.calls, ","); got != "exec-create:profile-id,exec-start:close-id,exec-inspect:close-id,stop:profile-id,remove:profile-id" {
+		t.Fatalf("timeout lifecycle = %q", got)
+	}
+}
+
+func TestStoppedProfileAndEphemeralRemoval(t *testing.T) {
+	fake := &sessionLifecycleFake{}
+	stopped := containertypes.Summary{ID: "stopped-id", Names: []string{"/hatch-profile-google"}, State: containertypes.StateExited}
+	if err := removeSessionContainer(context.Background(), fake, stopped); err != nil {
+		t.Fatalf("remove stopped profile: %v", err)
+	}
+	ephemeral := containertypes.Summary{ID: "ephemeral-id", Names: []string{"/hatch-abc123"}, State: containertypes.StateRunning}
+	if err := removeSessionContainer(context.Background(), fake, ephemeral); err != nil {
+		t.Fatalf("remove ephemeral: %v", err)
+	}
+	if got := strings.Join(fake.calls, ","); got != "remove:stopped-id,force-remove:ephemeral-id" {
+		t.Fatalf("lifecycle = %q", got)
+	}
+}
+
+func TestRemoveStaleProfileContainer(t *testing.T) {
+	stale := containertypes.Summary{ID: "stale-id", Names: []string{"/hatch-profile-google"}, State: containertypes.StateExited, Labels: map[string]string{"io.everydaydevops.hatch.managed": "true"}}
+	other := containertypes.Summary{ID: "other-id", Names: []string{"/hatch-profile-work"}, State: containertypes.StateExited, Labels: map[string]string{"io.everydaydevops.hatch.managed": "true"}}
+	fake := &sessionLifecycleFake{containers: []containertypes.Summary{stale, other}}
+	if err := removeStaleProfileContainer(context.Background(), fake, "hatch-profile-google"); err != nil {
+		t.Fatalf("removeStaleProfileContainer() error = %v", err)
+	}
+	if got := strings.Join(fake.calls, ","); got != "remove:stale-id" {
+		t.Fatalf("stale cleanup = %q", got)
+	}
+
+	fake = &sessionLifecycleFake{containers: []containertypes.Summary{{ID: "running-id", Names: []string{"/hatch-profile-google"}, State: containertypes.StateRunning, Labels: stale.Labels}}}
+	if err := removeStaleProfileContainer(context.Background(), fake, "hatch-profile-google"); err != nil {
+		t.Fatalf("running profile cleanup error = %v", err)
+	}
+	if len(fake.calls) != 0 {
+		t.Fatalf("running profile was changed: %v", fake.calls)
 	}
 }
 
