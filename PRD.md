@@ -24,6 +24,10 @@ Hatch must provide browser-based desktop access through HTTPS from the container
 - The Go CLI stores the public hostname during `hatch init` and optionally stores an HTTPS port when provided as either `hostname:port` or `hostname port`.
 - When no init port is configured and no open port override is provided, the Go CLI allocates a dynamic HTTPS port so multiple sessions can run concurrently.
 - The Go CLI supports `hatch open --port <port> <url>` for a fixed per-session HTTPS port and fails if that port is already in use.
+- The Go CLI supports `hatch open --profile <name> <url>` to reuse a named Docker volume mounted at Chromium's profile directory across stopped sessions. Without `--profile`, sessions remain disposable.
+- Profile names are validated before Docker operations. A profile can be used by only one Hatch session at a time, while distinct profiles can run concurrently.
+- Stopping a session removes its container but preserves its named profile volume; operators can remove the volume explicitly when they want to discard stored browser authentication data.
+- Stopping a profile-backed session requests a normal Chromium window close, waits for the browser to exit, and uses a bounded termination fallback if it hangs before removing the container. A stopped managed profile container left behind by an external stop does not block the next launch.
 - The Go CLI waits for the launched Hatch container to report healthy before printing the browser URL.
 - The Go CLI can stop one managed session by ID or all managed Hatch sessions with `hatch stop --all`.
 - Docker Compose uses host-network OAuth callback mode, listens on host port `8443` by default, and does not rely on ignored port mappings.

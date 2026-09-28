@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	_ "embed"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -22,6 +23,7 @@ import (
 
 	"github.com/moby/moby/api/pkg/stdcopy"
 	containertypes "github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/mount"
 	mobyclient "github.com/moby/moby/client"
 	"gopkg.in/yaml.v3"
 )
@@ -35,6 +37,10 @@ const (
 )
 
 var accessPathRE = regexp.MustCompile(`Hatch access path:\s+(/hatch/\?token=[^\s]+)`)
+var profileNameRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`)
+
+//go:embed chromium-close.sh
+var chromiumCloseScript string
 
 type config struct {
 	Hostname string `yaml:"hostname"`
@@ -42,8 +48,9 @@ type config struct {
 }
 
 type openOptions struct {
-	URL  string
-	Port int
+	URL     string
+	Port    int
+	Profile string
 }
 
 type dockerState int
@@ -118,11 +125,11 @@ func run(args []string) error {
 }
 
 func printUsage() {
-	fmt.Println(`Hatch launches an ephemeral browser desktop for an OAuth URL.
+	fmt.Println(`Hatch launches a browser desktop for an OAuth URL.
 
 Usage:
   hatch init [hostname[:port]|hostname port]
-  hatch open [--port port] <url>
+  hatch open [--port port] [--profile name] <url>
   hatch list
   hatch stop <session>|--all
 
@@ -131,6 +138,7 @@ Examples:
   hatch init devbox.tailnet.ts.net 8443
   hatch init devbox.tailnet.ts.net:8443
   hatch open --port 8443 'https://example.com/oauth/authorize?...'
+  hatch open --profile google 'https://example.com/oauth/authorize?...'
   hatch open 'https://example.com/oauth/authorize?...'
   hatch list
   hatch stop --all
@@ -260,7 +268,7 @@ func parseEndpoint(input, rawPort string) (string, int, error) {
 
 func parseOpenArgs(args []string) (openOptions, error) {
 	if len(args) == 0 {
-		return openOptions{}, errors.New("usage: hatch open [--port port] <url>")
+		return openOptions{}, errors.New("usage: hatch open [--port port] [--profile name] <url>")
 	}
 
 	var opts openOptions
@@ -272,7 +280,7 @@ func parseOpenArgs(args []string) (openOptions, error) {
 				return openOptions{}, errors.New("port specified more than once")
 			}
 			if i+1 >= len(args) {
-				return openOptions{}, errors.New("usage: hatch open [--port port] <url>")
+				return openOptions{}, errors.New("usage: hatch open [--port port] [--profile name] <url>")
 			}
 			port, err := parsePort(args[i+1])
 			if err != nil {
@@ -289,17 +297,35 @@ func parseOpenArgs(args []string) (openOptions, error) {
 				return openOptions{}, err
 			}
 			opts.Port = port
+		case arg == "--profile" || strings.HasPrefix(arg, "--profile="):
+			if opts.Profile != "" {
+				return openOptions{}, errors.New("profile specified more than once")
+			}
+			var name string
+			if arg == "--profile" {
+				if i+1 >= len(args) {
+					return openOptions{}, errors.New("usage: hatch open [--port port] [--profile name] <url>")
+				}
+				i++
+				name = args[i]
+			} else {
+				name = strings.TrimPrefix(arg, "--profile=")
+			}
+			if !profileNameRE.MatchString(name) {
+				return openOptions{}, fmt.Errorf("invalid profile %q: use 1-32 lowercase letters, digits, or hyphens; start and end with a letter or digit", name)
+			}
+			opts.Profile = name
 		case strings.HasPrefix(arg, "-"):
 			return openOptions{}, fmt.Errorf("unknown option %q", arg)
 		default:
 			if opts.URL != "" {
-				return openOptions{}, errors.New("usage: hatch open [--port port] <url>")
+				return openOptions{}, errors.New("usage: hatch open [--port port] [--profile name] <url>")
 			}
 			opts.URL = arg
 		}
 	}
 	if opts.URL == "" {
-		return openOptions{}, errors.New("usage: hatch open [--port port] <url>")
+		return openOptions{}, errors.New("usage: hatch open [--port port] [--profile name] <url>")
 	}
 	return opts, nil
 }
@@ -574,7 +600,7 @@ func launch(opts openOptions) error {
 	if err != nil {
 		return err
 	}
-	name := "hatch-" + sessionID
+	name := sessionContainerName(sessionID, opts.Profile)
 
 	labels := map[string]string{
 		"io.everydaydevops.hatch.managed":   "true",
@@ -582,8 +608,13 @@ func launch(opts openOptions) error {
 		"io.everydaydevops.hatch.start-url": redactedStartURL(startURL),
 		"io.everydaydevops.hatch.port":      strconv.Itoa(port),
 	}
+	if opts.Profile != "" {
+		if err := removeStaleProfileContainer(ctx, cli, name); err != nil {
+			return fmt.Errorf("prepare profile %q: %w", opts.Profile, err)
+		}
+	}
 
-	created, err := cli.ContainerCreate(ctx, launchContainerOptions(name, startURL, port, labels))
+	created, err := cli.ContainerCreate(ctx, launchContainerOptions(name, startURL, port, labels, opts.Profile))
 	if err != nil {
 		return fmt.Errorf("create container from %s: %w", defaultImage, err)
 	}
@@ -612,6 +643,9 @@ func launch(opts openOptions) error {
 	fmt.Printf("Session:      %s\n", sessionID)
 	fmt.Printf("Container:    %s\n", name)
 	fmt.Printf("Start URL:    %s\n", startURL)
+	if opts.Profile != "" {
+		fmt.Printf("Profile:      %s (Docker volume hatch-chromium-%s)\n", opts.Profile, opts.Profile)
+	}
 	fmt.Printf("Browser URL:  https://%s:%d%s\n", cfg.Hostname, port, accessPath)
 	fmt.Printf("Stop with:    hatch stop %s\n", sessionID)
 	return nil
@@ -636,8 +670,15 @@ func requireFreePort(port int) (int, error) {
 	return port, nil
 }
 
-func launchContainerOptions(name, startURL string, port int, labels map[string]string) mobyclient.ContainerCreateOptions {
-	return mobyclient.ContainerCreateOptions{
+func sessionContainerName(sessionID, profile string) string {
+	if profile != "" {
+		return "hatch-profile-" + profile
+	}
+	return "hatch-" + sessionID
+}
+
+func launchContainerOptions(name, startURL string, port int, labels map[string]string, profile string) mobyclient.ContainerCreateOptions {
+	opts := mobyclient.ContainerCreateOptions{
 		Name: name,
 		Config: &containertypes.Config{
 			Image: defaultImage,
@@ -654,6 +695,14 @@ func launchContainerOptions(name, startURL string, port int, labels map[string]s
 			SecurityOpt: []string{"no-new-privileges:true"},
 		},
 	}
+	if profile != "" {
+		opts.HostConfig.Mounts = []mount.Mount{{
+			Type:   mount.TypeVolume,
+			Source: "hatch-chromium-" + profile,
+			Target: "/home/oauth/.config/chromium",
+		}}
+	}
+	return opts
 }
 
 func validateStartURL(raw string) (string, error) {
@@ -837,7 +886,7 @@ func stopSession(session string) error {
 		return fmt.Errorf("session prefix %q matches multiple sessions", session)
 	}
 
-	if _, err := cli.ContainerRemove(ctx, matches[0].ID, mobyclient.ContainerRemoveOptions{Force: true}); err != nil {
+	if err := removeSessionContainer(ctx, cli, matches[0]); err != nil {
 		return fmt.Errorf("remove session: %w", err)
 	}
 	fmt.Printf("Stopped %s\n", matches[0].Labels["io.everydaydevops.hatch.session"])
@@ -866,10 +915,107 @@ func stopAllSessions() error {
 		return containers[i].Labels["io.everydaydevops.hatch.session"] < containers[j].Labels["io.everydaydevops.hatch.session"]
 	})
 	for _, ctr := range containers {
-		if _, err := cli.ContainerRemove(ctx, ctr.ID, mobyclient.ContainerRemoveOptions{Force: true}); err != nil {
+		if err := removeSessionContainer(ctx, cli, ctr); err != nil {
 			return fmt.Errorf("remove session %s: %w", ctr.Labels["io.everydaydevops.hatch.session"], err)
 		}
 		fmt.Printf("Stopped %s\n", ctr.Labels["io.everydaydevops.hatch.session"])
+	}
+	return nil
+}
+
+type sessionLifecycleClient interface {
+	ContainerList(context.Context, mobyclient.ContainerListOptions) (mobyclient.ContainerListResult, error)
+	ContainerStop(context.Context, string, mobyclient.ContainerStopOptions) (mobyclient.ContainerStopResult, error)
+	ContainerRemove(context.Context, string, mobyclient.ContainerRemoveOptions) (mobyclient.ContainerRemoveResult, error)
+	ExecCreate(context.Context, string, mobyclient.ExecCreateOptions) (mobyclient.ExecCreateResult, error)
+	ExecStart(context.Context, string, mobyclient.ExecStartOptions) (mobyclient.ExecStartResult, error)
+	ExecInspect(context.Context, string, mobyclient.ExecInspectOptions) (mobyclient.ExecInspectResult, error)
+}
+
+func isProfileContainer(ctr containertypes.Summary) bool {
+	for _, name := range ctr.Names {
+		if strings.HasPrefix(name, "/hatch-profile-") {
+			return true
+		}
+	}
+	return false
+}
+
+func removeSessionContainer(ctx context.Context, cli sessionLifecycleClient, ctr containertypes.Summary) error {
+	if !isProfileContainer(ctr) {
+		_, err := cli.ContainerRemove(ctx, ctr.ID, mobyclient.ContainerRemoveOptions{Force: true})
+		return err
+	}
+	if ctr.State == containertypes.StateRunning {
+		if err := closeChromium(ctx, cli, ctr.ID); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Chromium close was incomplete for %s: %v; stopping the container anyway.\n", ctr.ID, err)
+		}
+		graceSeconds := 30
+		stopCtx, cancel := context.WithTimeout(ctx, 40*time.Second)
+		defer cancel()
+		if _, err := cli.ContainerStop(stopCtx, ctr.ID, mobyclient.ContainerStopOptions{Timeout: &graceSeconds}); err != nil {
+			return fmt.Errorf("stop profile container gracefully: %w", err)
+		}
+	}
+	if _, err := cli.ContainerRemove(ctx, ctr.ID, mobyclient.ContainerRemoveOptions{}); err != nil {
+		return fmt.Errorf("remove profile container: %w", err)
+	}
+	return nil
+}
+
+func closeChromium(ctx context.Context, cli sessionLifecycleClient, containerID string) error {
+	closeCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	exec, err := cli.ExecCreate(closeCtx, containerID, mobyclient.ExecCreateOptions{
+		User: "oauth",
+		Cmd:  []string{"/bin/sh", "-c", chromiumCloseScript},
+	})
+	if err != nil {
+		return fmt.Errorf("create close command: %w", err)
+	}
+	if _, err := cli.ExecStart(closeCtx, exec.ID, mobyclient.ExecStartOptions{Detach: true}); err != nil {
+		return fmt.Errorf("start close command: %w", err)
+	}
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		result, err := cli.ExecInspect(closeCtx, exec.ID, mobyclient.ExecInspectOptions{})
+		if err != nil {
+			return fmt.Errorf("inspect close command: %w", err)
+		}
+		if !result.Running {
+			if result.ExitCode != 0 {
+				return fmt.Errorf("close command exited with status %d", result.ExitCode)
+			}
+			return nil
+		}
+		select {
+		case <-closeCtx.Done():
+			return closeCtx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func removeStaleProfileContainer(ctx context.Context, cli sessionLifecycleClient, name string) error {
+	result, err := cli.ContainerList(ctx, mobyclient.ContainerListOptions{All: true})
+	if err != nil {
+		return fmt.Errorf("list containers: %w", err)
+	}
+	for _, ctr := range result.Items {
+		if ctr.Labels["io.everydaydevops.hatch.managed"] != "true" {
+			continue
+		}
+		matchesName := false
+		for _, candidate := range ctr.Names {
+			if candidate == "/"+name {
+				matchesName = true
+				break
+			}
+		}
+		if matchesName && (ctr.State == containertypes.StateExited || ctr.State == containertypes.StateCreated || ctr.State == containertypes.StateDead) {
+			return removeSessionContainer(ctx, cli, ctr)
+		}
 	}
 	return nil
 }

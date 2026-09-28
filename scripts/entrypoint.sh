@@ -21,7 +21,9 @@ if printf '%s' "$RDP_PASSWORD" | LC_ALL=C grep -q '[[:cntrl:]]'; then
 fi
 if ! id "$RDP_USER" >/dev/null 2>&1; then useradd --create-home --shell /bin/bash "$RDP_USER"; fi
 printf '%s:%s\n' "$RDP_USER" "$RDP_PASSWORD" | chpasswd
+install -d -o "$RDP_USER" -g "$RDP_USER" -m 0700 "/home/$RDP_USER"
 install -d -o "$RDP_USER" -g "$RDP_USER" -m 0700 "/home/$RDP_USER/.config"
+install -d -o "$RDP_USER" -g "$RDP_USER" -m 0700 "/home/$RDP_USER/.config/chromium"
 install -d -o "$RDP_USER" -g "$RDP_USER" -m 0700 "/home/$RDP_USER/.cache"
 install -d -m 0755 /etc/hatch
 printf '%s\n' "${HATCH_START_URL:-about:blank}" > /etc/hatch/start-url

@@ -243,7 +243,7 @@ Disabling the sandbox reduces browser security.
 
 ## Browser Persistence
 
-Hatch is disposable by default. Browser cookies and sessions disappear when the container is replaced. If persistent sessions are required, mount `/home/oauth/.config/chromium` as a Docker volume. Persistent browser profiles contain sensitive authentication material and must be protected accordingly.
+Hatch is disposable by default. For CLI sessions, use `hatch open --profile google '<url>'` on each launch to reuse the Docker volume `hatch-chromium-google`. Stop the previous session before reopening the same profile. `hatch stop` keeps the volume; remove it with `docker volume rm hatch-chromium-google` after stopping the session to discard the saved sign-in state. For direct Docker or Compose use, mount `/home/oauth/.config/chromium` as a Docker volume. Persistent profiles contain sensitive authentication material and must be protected accordingly.
 
 ## Updating
 
